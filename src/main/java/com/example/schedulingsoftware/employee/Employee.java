@@ -1,0 +1,97 @@
+package com.example.schedulingsoftware.employee;
+
+import java.time.Instant;
+
+import org.hibernate.annotations.ColumnDefault;
+
+import com.example.schedulingsoftware.area.Area;
+import com.example.schedulingsoftware.store.Store;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Entity
+@Table(name = "employees")
+@Getter
+@Setter
+@NoArgsConstructor
+public class Employee {
+
+    public static final int DEFAULT_WORK_DAYS_PER_WEEK = 6;
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true, length = 20)
+    private String employeeCode;
+
+    @Column(nullable = false, length = 60)
+    private String firstName;
+
+    @Column(nullable = false, length = 60)
+    private String lastName;
+
+    @Column(nullable = false, unique = true, length = 120)
+    private String email;
+
+    @Column(length = 30)
+    private String phone;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Role role = Role.EMPLOYEE;
+
+    /** Required for managers and employees; admins may sit outside any area. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "area_id")
+    private Area area;
+
+    /** Where this person normally works. Weekly schedules start from it; managers can rotate them elsewhere. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "home_store_id")
+    private Store homeStore;
+
+    /** Normal working days in a Mon-Sun week. Most staff work 6 days (one day off). */
+    @Column(nullable = false)
+    private int workDaysPerWeek = DEFAULT_WORK_DAYS_PER_WEEK;
+
+    @Column(nullable = false)
+    private boolean active = true;
+
+    /** BCrypt hash. Null means this person has no login yet. */
+    @Column(length = 100)
+    private String passwordHash;
+
+    /** Set when an admin issues a temporary password; cleared once the employee picks their own. */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    private boolean mustChangePassword;
+
+    private Instant lastLoginAt;
+
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @PrePersist
+    void onCreate() {
+        createdAt = Instant.now();
+    }
+
+    public String getFullName() {
+        return firstName + " " + lastName;
+    }
+}

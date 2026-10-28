@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:alliancetel;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: create-drop
+
+alliancetel:
+  scheduling:
+    max-day-off-requests-per-week: 2
+  demo-data:
+    enabled: false

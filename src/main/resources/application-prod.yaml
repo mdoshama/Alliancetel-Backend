@@ -1,0 +1,28 @@
+# Production profile: SPRING_PROFILES_ACTIVE=prod
+# Required environment variables (startup fails if any is missing):
+#   DB_URL, DB_USERNAME, DB_PASSWORD, JWT_SECRET (32+ chars), and ADMIN_PASSWORD for the first start.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  jpa:
+    show-sql: false
+
+alliancetel:
+  security:
+    jwt-secret: ${JWT_SECRET}
+    require-strong-secret: true
+  bootstrap-admin:
+    email: ${ADMIN_EMAIL:admin@alliancetel.com}
+    # No default in production: set ADMIN_PASSWORD for the first start (it must be changed at first sign-in).
+    password: ${ADMIN_PASSWORD:}
+  demo-data:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    org.hibernate.SQL: WARN

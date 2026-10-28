@@ -1,0 +1,54 @@
+# Runs the whole app on one server: PostgreSQL + Spring Boot API + nginx serving the Angular site.
+# Usage (from this folder):  cp .env.example .env   # fill it in
+#                            docker compose up -d --build
+# The frontend project must sit next to this one (../scheduling-software-frontend).
+name: alliancetel
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: alliancetel
+      POSTGRES_USER: alliancetel
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      TZ: ${TZ:-America/Los_Angeles}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alliancetel -d alliancetel"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://db:5432/alliancetel
+      DB_USERNAME: alliancetel
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (openssl rand -base64 48)}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@alliancetel.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      TZ: ${TZ:-America/Los_Angeles}
+    # Not published to the internet: only the frontend container talks to it.
+    expose:
+      - "8080"
+
+  frontend:
+    build: ../scheduling-software-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: http://backend:8080
+    ports:
+      - "${HTTP_PORT:-80}:80"
+
+volumes:
+  db-data:
