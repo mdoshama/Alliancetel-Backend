@@ -117,7 +117,8 @@ public class ScheduleService {
                         Collectors.mapping(DayOffRequest::getOffDate, Collectors.toSet())));
 
         List<EmployeeInput> inputs = staff.stream()
-                .map(e -> new EmployeeInput(e.getId(), e.getWorkDaysPerWeek(), approved.getOrDefault(e.getId(), Set.of())))
+                .map(e -> new EmployeeInput(e.getId(), e.getWorkDaysPerWeek(), approved.getOrDefault(e.getId(), Set.of()),
+                        homeStoreOf(e) == null ? null : homeStoreOf(e).getId()))
                 .toList();
         Map<Long, Map<LocalDate, DayType>> plan = generator.generate(weekStart, inputs);
 
@@ -194,6 +195,133 @@ public class ScheduleService {
         b.setManuallyEdited(true);
         a.setAutoAssigned(false);
         b.setAutoAssigned(false);
+        schedule.setUpdatedAt(Instant.now());
+        return toResponse(schedule);
+    }
+
+    /**
+     * Drag and drop between any two days on the schedule (any person, any day): the two days trade places, e.g.
+     * Ana's Tuesday at Oceanside and Ben's Thursday off become Ana off on Tuesday and Ben at Oceanside on Thursday.
+     * With {@code storeId} the dragged work day lands at that store instead (a drop on a store's row).
+     *
+     * <p>A work day that lands on a date its store is closed goes to the person's home store if that is open, and is
+     * refused otherwise. Approved days off never move, and nobody is put to work on a day they were given off.
+     */
+    @Transactional
+    public ScheduleResponse exchange(Long scheduleId, Long fromEntryId, Long toEntryId, Long storeId) {
+        WeeklySchedule schedule = getManaged(scheduleId);
+        requireDraft(schedule);
+        ScheduleEntry from = entry(schedule, fromEntryId);
+        ScheduleEntry to = entry(schedule, toEntryId);
+        if (from.getType() == DayType.REQUESTED_OFF || to.getType() == DayType.REQUESTED_OFF) {
+            throw new BusinessRuleException("An approved day off can't be moved. Reject or change the request instead.");
+        }
+        DayType fromType = from.getType();
+        Store fromStore = from.getStore();
+        if (storeId != null) {
+            if (fromType != DayType.WORK) {
+                throw new BusinessRuleException("Only a work day can be dropped on a store.");
+            }
+            fromStore = storeService.requireAssignable(storeId, schedule.getArea().getId());
+        }
+        if (from.getId().equals(to.getId())) {
+            if (storeId == null) {
+                throw new BusinessRuleException("Drop it on a different day.");
+            }
+            from.setStore(placeStore(schedule, from.getEmployee(), from.getWorkDate(), DayType.WORK, fromStore, true));
+            from.setManuallyEdited(true);
+            from.setAutoAssigned(false);
+            schedule.setUpdatedAt(Instant.now());
+            return toResponse(schedule);
+        }
+        DayType toType = to.getType();
+        Store toStore = to.getStore();
+        Store newToStore = placeStore(schedule, to.getEmployee(), to.getWorkDate(), fromType, fromStore, storeId != null);
+        Store newFromStore = placeStore(schedule, from.getEmployee(), from.getWorkDate(), toType, toStore, false);
+
+        to.setType(fromType);
+        to.setStore(newToStore);
+        from.setType(toType);
+        from.setStore(newFromStore);
+        for (ScheduleEntry e : List.of(from, to)) {
+            e.setManuallyEdited(true);
+            e.setAutoAssigned(false);
+        }
+        schedule.setUpdatedAt(Instant.now());
+        return toResponse(schedule);
+    }
+
+    /** Where a day that is being moved ends up; see {@link #exchange}. */
+    private Store placeStore(WeeklySchedule schedule, Employee person, LocalDate date, DayType type, Store store,
+            boolean exactStore) {
+        if (type != DayType.WORK) {
+            return null;
+        }
+        if (hasApprovedDayOff(person, date)) {
+            throw new BusinessRuleException(person.getFirstName() + " has an approved day off on " + dayName(date)
+                    + ", so it can't be made a work day.");
+        }
+        if (store != null && store.isOpenOn(date)) {
+            return store;
+        }
+        if (exactStore && store != null) {
+            requireOpen(store, date);
+        }
+        Store home = homeStoreOf(person);
+        if (home != null && home.isOpenOn(date)) {
+            return home;
+        }
+        if (anyStoreOpen(schedule, date)) {
+            throw new BusinessRuleException((store == null ? "That store" : store.getName()) + " is closed on "
+                    + dayName(date) + ". Open the day to pick a store for " + person.getFirstName() + ".");
+        }
+        return null;
+    }
+
+    /**
+     * Moves one person's day off to another day of the same week: a work day and a day off trade places (e.g. off
+     * Tuesday becomes off Thursday). The new work day keeps the store of the old one when that store is open, otherwise
+     * the home store. Approved days off can't be moved.
+     */
+    @Transactional
+    public ScheduleResponse swapDays(Long scheduleId, Long entryIdA, Long entryIdB) {
+        WeeklySchedule schedule = getManaged(scheduleId);
+        requireDraft(schedule);
+        ScheduleEntry a = entry(schedule, entryIdA);
+        ScheduleEntry b = entry(schedule, entryIdB);
+        if (!a.getEmployee().getId().equals(b.getEmployee().getId()) || a.getWorkDate().equals(b.getWorkDate())) {
+            throw new BusinessRuleException("Pick two different days of the same person.");
+        }
+        if (a.getType() == DayType.REQUESTED_OFF || b.getType() == DayType.REQUESTED_OFF) {
+            throw new BusinessRuleException("An approved day off can't be moved. Reject or change the request instead.");
+        }
+        if ((a.getType() == DayType.WORK) == (b.getType() == DayType.WORK)) {
+            throw new BusinessRuleException("Drag a day off onto a work day (or the other way round) to move it.");
+        }
+        ScheduleEntry work = a.getType() == DayType.WORK ? a : b;
+        ScheduleEntry off = work == a ? b : a;
+        Employee person = work.getEmployee();
+        if (hasApprovedDayOff(person, off.getWorkDate())) {
+            throw new BusinessRuleException(person.getFirstName() + " has an approved day off on "
+                    + dayName(off.getWorkDate()) + ", so it can't be made a work day.");
+        }
+        Store store = work.getStore() != null && work.getStore().isOpenOn(off.getWorkDate()) ? work.getStore() : null;
+        if (store == null) {
+            Store home = homeStoreOf(person);
+            store = home != null && home.isOpenOn(off.getWorkDate()) ? home : null;
+        }
+        if (store == null && anyStoreOpen(schedule, off.getWorkDate())) {
+            throw new BusinessRuleException((work.getStore() == null ? "Their store" : work.getStore().getName())
+                    + " is closed on " + dayName(off.getWorkDate()) + ". Open the day to pick a store.");
+        }
+        off.setType(DayType.WORK);
+        off.setStore(store);
+        off.setAutoAssigned(false);
+        off.setManuallyEdited(true);
+        work.setType(DayType.OFF);
+        work.setStore(null);
+        work.setAutoAssigned(false);
+        work.setManuallyEdited(true);
         schedule.setUpdatedAt(Instant.now());
         return toResponse(schedule);
     }
@@ -398,9 +526,15 @@ public class ScheduleService {
                 .map(r -> r.getEmployee().getFullName())
                 .toList();
 
+        List<String> sameStoreOff = employee.getHomeStore() == null ? List.of()
+                : dayOffRepository.findSameStore(employee.getHomeStore().getId(), employee.getId(), date, date,
+                        EnumSet.of(DayOffStatus.PENDING, DayOffStatus.APPROVED)).stream()
+                        .map(r -> r.getEmployee().getFullName() + (r.getStatus() == DayOffStatus.PENDING ? " (waiting)" : ""))
+                        .toList();
+
         return new DayOffImpact(requestId, employee.getFullName(), date, level, summary, workingBefore, workingAfter,
                 needed, backToWork, schedule.map(WeeklySchedule::getStatus).orElse(null), alreadyOff, alsoRequested,
-                newShortages, was.gaps().size());
+                sameStoreOff, request.isEmergency(), newShortages, was.gaps().size());
     }
 
     private boolean hasApprovedDayOff(Employee employee, LocalDate date) {
@@ -450,12 +584,12 @@ public class ScheduleService {
     }
 
     /** One person's week in a what-if plan. */
-    private record Sim(Long employeeId, int workDays, Long homeStoreId, boolean anchored, Map<LocalDate, DayType> days,
-            Set<LocalDate> fixed, Map<LocalDate, Long> lockedStores) {
+    private record Sim(Long employeeId, int workDays, Long homeStoreId, boolean anchored, boolean primary,
+            Map<LocalDate, DayType> days, Set<LocalDate> fixed, Map<LocalDate, Long> lockedStores) {
 
         Sim copy() {
-            return new Sim(employeeId, workDays, homeStoreId, anchored, new HashMap<>(days), new java.util.HashSet<>(fixed),
-                    new HashMap<>(lockedStores));
+            return new Sim(employeeId, workDays, homeStoreId, anchored, primary, new HashMap<>(days),
+                    new java.util.HashSet<>(fixed), new HashMap<>(lockedStores));
         }
     }
 
@@ -485,7 +619,7 @@ public class ScheduleService {
             Employee emp = e.getEmployee();
             Store home = homeStoreOf(emp);
             Sim sim = plan.computeIfAbsent(emp.getId(), id -> new Sim(id, emp.getWorkDaysPerWeek(),
-                    home == null ? null : home.getId(), emp.isAnchoredToStore(), new HashMap<>(),
+                    home == null ? null : home.getId(), emp.isAnchoredToStore(), isPrimary(emp), new HashMap<>(),
                     new java.util.HashSet<>(), new HashMap<>()));
             sim.days().put(e.getWorkDate(), e.getType());
             if (e.isManuallyEdited()) {
@@ -516,13 +650,14 @@ public class ScheduleService {
             off.computeIfAbsent(extra.getEmployee().getId(), k -> new java.util.HashSet<>()).add(extra.getOffDate());
         }
         Map<Long, Map<LocalDate, DayType>> week = generator.generate(weekStart, staff.stream()
-                .map(e -> new EmployeeInput(e.getId(), e.getWorkDaysPerWeek(), off.getOrDefault(e.getId(), Set.of())))
+                .map(e -> new EmployeeInput(e.getId(), e.getWorkDaysPerWeek(), off.getOrDefault(e.getId(), Set.of()),
+                        homeStoreOf(e) == null ? null : homeStoreOf(e).getId()))
                 .toList());
         Map<Long, Sim> plan = new LinkedHashMap<>();
         for (Employee e : staff) {
             Store home = homeStoreOf(e);
             plan.put(e.getId(), new Sim(e.getId(), e.getWorkDaysPerWeek(), home == null ? null : home.getId(),
-                    e.isAnchoredToStore(), new HashMap<>(week.get(e.getId())), new java.util.HashSet<>(),
+                    e.isAnchoredToStore(), isPrimary(e), new HashMap<>(week.get(e.getId())), new java.util.HashSet<>(),
                     new HashMap<>()));
         }
         return plan;
@@ -536,12 +671,18 @@ public class ScheduleService {
                 .toList();
         List<StoreAssigner.WorkSlot> slots = new ArrayList<>();
         Map<LocalDate, Integer> working = new HashMap<>();
+        Map<Long, List<Map<LocalDate, DayType>>> primaries = new HashMap<>();
+        plan.values().stream().filter(s -> s.primary() && s.homeStoreId() != null)
+                .forEach(s -> primaries.computeIfAbsent(s.homeStoreId(), k -> new ArrayList<>()).add(s.days()));
+        Set<String> primaryAway = primaryAway(primaries, dates);
         for (Sim sim : plan.values()) {
             sim.days().forEach((d, t) -> {
                 if (t == DayType.WORK) {
                     working.merge(d, 1, Integer::sum);
+                    boolean anchored = sim.anchored()
+                            || (sim.homeStoreId() != null && primaryAway.contains(sim.homeStoreId() + "|" + d));
                     slots.add(new StoreAssigner.WorkSlot(sim.employeeId() + "|" + d, sim.employeeId(), d,
-                            sim.homeStoreId(), sim.anchored(), sim.fixed().contains(d), sim.lockedStores().get(d)));
+                            sim.homeStoreId(), anchored, sim.fixed().contains(d), sim.lockedStores().get(d)));
                 }
             });
         }
@@ -588,6 +729,19 @@ public class ScheduleService {
         Map<Long, Store> storesById = new HashMap<>();
         areaStores.forEach(s -> storesById.put(s.getId(), s));
 
+        // When a store's primary is off, its secondaries stay there to cover it instead of being sent elsewhere.
+        Map<Long, Map<Long, Map<LocalDate, DayType>>> primaryWeeks = new HashMap<>();
+        for (ScheduleEntry e : schedule.getEntries()) {
+            if (isPrimary(e.getEmployee())) {
+                primaryWeeks.computeIfAbsent(e.getEmployee().getHomeStore().getId(), k -> new HashMap<>())
+                        .computeIfAbsent(e.getEmployee().getId(), k -> new HashMap<>())
+                        .put(e.getWorkDate(), e.getType());
+            }
+        }
+        Map<Long, List<Map<LocalDate, DayType>>> primaries = new HashMap<>();
+        primaryWeeks.forEach((store, people) -> primaries.put(store, new ArrayList<>(people.values())));
+        Set<String> primaryAway = primaryAway(primaries, weekDates(schedule));
+
         List<StoreAssigner.WorkSlot> slots = new ArrayList<>();
         for (ScheduleEntry e : schedule.getEntries()) {
             if (e.getType() != DayType.WORK) {
@@ -596,8 +750,9 @@ public class ScheduleService {
                 continue;
             }
             Store home = homeStoreOf(e.getEmployee());
+            boolean coverForPrimary = home != null && primaryAway.contains(home.getId() + "|" + e.getWorkDate());
             slots.add(new StoreAssigner.WorkSlot(e, e.getEmployee().getId(), e.getWorkDate(),
-                    home == null ? null : home.getId(), e.getEmployee().isAnchoredToStore(),
+                    home == null ? null : home.getId(), e.getEmployee().isAnchoredToStore() || coverForPrimary,
                     e.isManuallyEdited(), e.getStore() == null ? null : e.getStore().getId()));
         }
         storeAssigner.assign(stores, slots).forEach((key, assignment) -> {
@@ -607,6 +762,28 @@ public class ScheduleService {
                 e.setAutoAssigned(assignment.auto());
             }
         });
+    }
+
+    /** Primary at an active home store. */
+    private static boolean isPrimary(Employee e) {
+        return e.isPrimaryAtStore() && homeStoreOf(e) != null;
+    }
+
+    /**
+     * "storeId|date" for every day a store that has primaries has none of them working; that day its secondaries are
+     * kept at the store.
+     */
+    private static Set<String> primaryAway(Map<Long, List<Map<LocalDate, DayType>>> primariesByStore,
+            List<LocalDate> dates) {
+        Set<String> away = new java.util.HashSet<>();
+        primariesByStore.forEach((store, weeks) -> {
+            for (LocalDate d : dates) {
+                if (weeks.stream().noneMatch(w -> w.get(d) == DayType.WORK)) {
+                    away.add(store + "|" + d);
+                }
+            }
+        });
+        return away;
     }
 
     private static ScheduleEntry entry(WeeklySchedule schedule, Long entryId) {
@@ -652,6 +829,9 @@ public class ScheduleService {
     private ScheduleResponse toResponse(WeeklySchedule schedule) {
         List<LocalDate> dates = weekDates(schedule);
 
+        // Primary / secondary / floater is for managers; employees don't see it.
+        boolean hideStoreRoles = accessPolicy.current().isEmployee();
+
         Map<Long, List<ScheduleEntry>> byEmployee = new LinkedHashMap<>();
         Map<LocalDate, Integer> headCount = new HashMap<>();
         for (ScheduleEntry entry : schedule.getEntries()) {
@@ -681,7 +861,7 @@ public class ScheduleService {
                     Store home = e.getHomeStore();
                     return new EmployeeRow(e.getId(), e.getEmployeeCode(), e.getFullName(), e.getRole(),
                             home == null ? null : home.getId(), home == null ? null : home.getName(),
-                            e.getStoreRole(), e.getWorkDaysPerWeek(), working, cells);
+                            hideStoreRoles ? null : e.getStoreRole(), e.getWorkDaysPerWeek(), working, cells);
                 })
                 .sorted(Comparator.comparing((EmployeeRow r) -> r.role() == Role.MANAGER ? 0 : 1)
                         .thenComparing(EmployeeRow::employeeName))

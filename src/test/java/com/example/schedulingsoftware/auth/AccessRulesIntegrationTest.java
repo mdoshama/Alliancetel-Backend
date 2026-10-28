@@ -93,8 +93,8 @@ class AccessRulesIntegrationTest {
     void employeeRequestsOnlyForSelfAndSeesOnlyPublishedSchedules() {
         TestUsers.signInAs(sdEmployee, Role.EMPLOYEE, sanDiego);
         assertThrows(AccessDeniedException.class, () ->
-                dayOffService.create(new CreateDayOffRequest(laEmployee, List.of(nextMonday), null)));
-        Long requestId = dayOffService.create(new CreateDayOffRequest(sdEmployee, List.of(nextMonday), null))
+                dayOffService.create(new CreateDayOffRequest(laEmployee, List.of(nextMonday), null, null)));
+        Long requestId = dayOffService.create(new CreateDayOffRequest(sdEmployee, List.of(nextMonday), null, null))
                 .getFirst().id();
         assertEquals(1, dayOffService.search(null, null, null, null, null).size());
 
@@ -116,7 +116,7 @@ class AccessRulesIntegrationTest {
     @Test
     void managerCannotApproveOwnRequest() {
         TestUsers.signInAs(sdManager, Role.MANAGER, sanDiego);
-        Long own = dayOffService.create(new CreateDayOffRequest(sdManager, List.of(nextMonday), null)).getFirst().id();
+        Long own = dayOffService.create(new CreateDayOffRequest(sdManager, List.of(nextMonday), null, null)).getFirst().id();
         assertThrows(AccessDeniedException.class, () -> dayOffService.approve(own, null));
 
         TestUsers.signInAsAdmin();

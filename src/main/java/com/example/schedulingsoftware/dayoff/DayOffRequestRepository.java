@@ -27,6 +27,21 @@ public interface DayOffRequestRepository
     long countByEmployeeIdAndOffDateBetweenAndStatusIn(Long employeeId, LocalDate from, LocalDate to,
             Collection<DayOffStatus> statuses);
 
+    /** Like the count above, but leaving out emergency requests (they don't use up the weekly limit). */
+    long countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalse(Long employeeId, LocalDate from, LocalDate to,
+            Collection<DayOffStatus> statuses);
+
+    /** Days off (in the given statuses) of other active people based at the same store, in a date range. */
+    @Query("""
+            select r from DayOffRequest r join fetch r.employee e
+            where e.homeStore.id = :storeId and e.active = true and e.id <> :employeeId
+              and r.offDate between :from and :to and r.status in :statuses
+            order by r.offDate, r.id
+            """)
+    List<DayOffRequest> findSameStore(@Param("storeId") Long storeId, @Param("employeeId") Long employeeId,
+            @Param("from") LocalDate from, @Param("to") LocalDate to,
+            @Param("statuses") Collection<DayOffStatus> statuses);
+
     @Query("""
             select r from DayOffRequest r join fetch r.employee e
             where e.area.id = :areaId and r.status = :status and r.offDate between :from and :to

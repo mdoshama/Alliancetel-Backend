@@ -47,7 +47,11 @@ public class AdminBootstrap implements ApplicationRunner {
             throw new IllegalStateException("No administrator can sign in yet. Set ADMIN_EMAIL and ADMIN_PASSWORD "
                     + "for the first start; the admin must change the password after signing in.");
         }
-        PasswordPolicy.validate(password);
+        try {
+            PasswordPolicy.validate(password);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("ADMIN_PASSWORD is too weak: " + e.getMessage(), e);
+        }
         String normalized = email.trim().toLowerCase(Locale.ROOT);
         Employee admin = employeeRepository.findByEmailIgnoreCase(normalized)
                 .or(() -> employeeRepository.findFirstByRoleAndActiveTrueOrderByIdAsc(Role.ADMIN))

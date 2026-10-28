@@ -58,10 +58,10 @@ class ScheduleServiceIntegrationTest {
         LocalDate monday = DayOffService.weekStart(LocalDate.now()).plusWeeks(1);
         LocalDate tuesday = monday.plusDays(1);
 
-        Long annaRequest = dayOffService.create(new CreateDayOffRequest(annaId, List.of(tuesday), "Doctor")).getFirst().id();
+        Long annaRequest = dayOffService.create(new CreateDayOffRequest(annaId, List.of(tuesday), "Doctor", null)).getFirst().id();
         dayOffService.approve(annaRequest, null);
         // Ben's request stays pending, so the scheduler should ignore it and report it.
-        dayOffService.create(new CreateDayOffRequest(benId, List.of(monday.plusDays(3)), null));
+        dayOffService.create(new CreateDayOffRequest(benId, List.of(monday.plusDays(3)), null, null));
 
         ScheduleResponse schedule = scheduleService.generate(areaId, monday.plusDays(4));
 
@@ -88,7 +88,7 @@ class ScheduleServiceIntegrationTest {
         LocalDate monday = DayOffService.weekStart(LocalDate.now()).plusWeeks(2);
 
         assertThrows(BusinessRuleException.class, () -> dayOffService.create(
-                new CreateDayOffRequest(id, List.of(monday, monday.plusDays(1), monday.plusDays(2)), null)));
+                new CreateDayOffRequest(id, List.of(monday, monday.plusDays(1), monday.plusDays(2)), null, null)));
     }
 
     private Long employee(String code, String name, Long areaId) {

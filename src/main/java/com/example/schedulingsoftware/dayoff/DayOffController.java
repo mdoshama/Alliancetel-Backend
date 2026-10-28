@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.ReviewDayOffRequest;
+import com.example.schedulingsoftware.dayoff.DayOffDtos.TakenDay;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.DayOffImpact;
 import com.example.schedulingsoftware.schedule.ScheduleService;
 
@@ -52,6 +53,14 @@ public class DayOffController {
     @ResponseStatus(HttpStatus.CREATED)
     public List<DayOffResponse> create(@Valid @RequestBody CreateDayOffRequest request) {
         return dayOffService.create(request);
+    }
+
+    /** Days a colleague at the same store already has off, so the request form can show them as taken. */
+    @GetMapping("/taken-days")
+    public List<TakenDay> takenDays(@RequestParam Long employeeId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return dayOffService.takenDays(employeeId, from, to);
     }
 
     @PostMapping("/{id}/approve")

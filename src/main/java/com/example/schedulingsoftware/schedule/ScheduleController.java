@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.GenerateScheduleRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.MoveForWeekRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.ScheduleResponse;
+import com.example.schedulingsoftware.schedule.ScheduleDtos.ExchangeRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.SwapRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.UpdateEntryRequest;
 
@@ -56,6 +57,18 @@ public class ScheduleController {
     }
 
     /** Re-runs automatic store assignment, keeping days set by hand. */
+    /** Drag and drop: two days trade places, any person and any day (optionally landing at a store). */
+    @PostMapping("/{scheduleId}/exchange")
+    public ScheduleResponse exchange(@PathVariable Long scheduleId, @Valid @RequestBody ExchangeRequest request) {
+        return scheduleService.exchange(scheduleId, request.fromEntryId(), request.toEntryId(), request.storeId());
+    }
+
+    /** One person's work day and day off trade places (moving their day off within the week). */
+    @PostMapping("/{scheduleId}/swap-days")
+    public ScheduleResponse swapDays(@PathVariable Long scheduleId, @Valid @RequestBody SwapRequest request) {
+        return scheduleService.swapDays(scheduleId, request.entryIdA(), request.entryIdB());
+    }
+
     @PostMapping("/{scheduleId}/auto-assign-stores")
     public ScheduleResponse autoAssignStores(@PathVariable Long scheduleId) {
         return scheduleService.autoAssignStores(scheduleId);

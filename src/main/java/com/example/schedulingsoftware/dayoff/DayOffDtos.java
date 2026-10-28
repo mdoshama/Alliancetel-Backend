@@ -18,7 +18,13 @@ public final class DayOffDtos {
     public record CreateDayOffRequest(
             @NotNull Long employeeId,
             @NotEmpty @Size(max = 7) List<@NotNull LocalDate> dates,
-            @Size(max = 255) String reason) {
+            @Size(max = 255) String reason,
+            /** Urgent: allowed even if a colleague at the same store is off, and outside the weekly limit. */
+            Boolean emergency) {
+    }
+
+    /** A day someone at the same store already has off (pending or approved), so a normal request can't take it. */
+    public record TakenDay(LocalDate date, String takenBy, DayOffStatus status) {
     }
 
     public record ReviewDayOffRequest(@Size(max = 255) String note) {
@@ -34,6 +40,7 @@ public final class DayOffDtos {
             LocalDate date,
             DayOfWeek dayOfWeek,
             String reason,
+            boolean emergency,
             DayOffStatus status,
             String reviewNote,
             Instant reviewedAt,
@@ -43,7 +50,7 @@ public final class DayOffDtos {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
-                    reason, status, reviewNote, reviewedAt, createdAt, update);
+                    reason, emergency, status, reviewNote, reviewedAt, createdAt, update);
         }
 
         public static DayOffResponse from(DayOffRequest r) {
@@ -58,6 +65,7 @@ public final class DayOffDtos {
                     r.getOffDate(),
                     r.getOffDate().getDayOfWeek(),
                     r.getReason(),
+                    r.isEmergency(),
                     r.getStatus(),
                     r.getReviewNote(),
                     r.getReviewedAt(),

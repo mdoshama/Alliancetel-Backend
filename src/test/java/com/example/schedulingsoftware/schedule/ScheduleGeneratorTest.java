@@ -21,6 +21,39 @@ class ScheduleGeneratorTest {
     private final ScheduleGenerator generator = new ScheduleGenerator();
 
     @Test
+    void peopleFromTheSameStoreAreNotOffOnTheSameDay() {
+        // 7 people at one store, 6 days each: every day of the week gets exactly one of them off.
+        List<EmployeeInput> store = new java.util.ArrayList<>();
+        for (long id = 1; id <= 7; id++) {
+            store.add(new EmployeeInput(id, 6, Set.of(), 10L));
+        }
+        var week = generator.generate(MONDAY, store);
+        Set<LocalDate> offDays = new java.util.HashSet<>();
+        week.values().forEach(w -> w.forEach((d, t) -> {
+            if (t != DayType.WORK) {
+                offDays.add(d);
+            }
+        }));
+        assertEquals(7, offDays.size(), "each person is off on a different day");
+    }
+
+    @Test
+    void theSecondaryIsNotGivenTheDayThePrimaryAskedFor() {
+        LocalDate wed = MONDAY.plusDays(2);
+        // Plenty of other staff make Wednesday the busiest day, which would normally attract the day off.
+        List<EmployeeInput> people = new java.util.ArrayList<>(List.of(
+                new EmployeeInput(1L, 6, Set.of(wed), 10L),   // primary, approved Wednesday off
+                new EmployeeInput(2L, 6, Set.of(), 10L)));    // secondary at the same store
+        for (long id = 3; id <= 8; id++) {
+            people.add(new EmployeeInput(id, 7, Set.of(), 20L));
+        }
+        var week = generator.generate(MONDAY, people);
+        assertEquals(DayType.REQUESTED_OFF, week.get(1L).get(wed));
+        assertEquals(DayType.WORK, week.get(2L).get(wed), "the secondary works the primary's day off");
+        assertEquals(1, count(week.get(2L), DayType.OFF));
+    }
+
+    @Test
     void sixDayEmployeeWithoutRequestGetsExactlyOneDayOff() {
         var week = generator.generate(MONDAY, List.of(new EmployeeInput(1L, 6, Set.of()))).get(1L);
 

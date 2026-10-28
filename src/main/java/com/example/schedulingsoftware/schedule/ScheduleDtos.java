@@ -23,6 +23,13 @@ public final class ScheduleDtos {
     public record UpdateEntryRequest(@NotNull DayType type, Long storeId) {
     }
 
+    /**
+     * Drag and drop: the two days trade places, whoever and whenever they are. With {@code storeId}, the dragged work
+     * day lands at that store (a drop on a store's row).
+     */
+    public record ExchangeRequest(@NotNull Long fromEntryId, @NotNull Long toEntryId, Long storeId) {
+    }
+
     /** Two people trade what they are doing on the same day (store and work/off). */
     public record SwapRequest(@NotNull Long entryIdA, @NotNull Long entryIdB) {
     }
@@ -116,6 +123,10 @@ public final class ScheduleDtos {
             List<String> alreadyOff,
             /** Others who also asked for that day and are still waiting. */
             List<String> alsoRequested,
+            /** Colleagues at the same home store who are off (or asked to be) that day. */
+            List<String> sameStoreOff,
+            /** The request was sent as an emergency. */
+            boolean emergency,
             /** Store-days that would fall below their minimum, or further below it (any day that week). */
             List<Shortage> newShortages,
             /** Shortages that week that exist anyway, whatever the decision. */

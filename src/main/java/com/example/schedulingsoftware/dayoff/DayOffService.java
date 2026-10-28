@@ -25,6 +25,7 @@ import com.example.schedulingsoftware.common.BusinessRuleException;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
+import com.example.schedulingsoftware.dayoff.DayOffDtos.TakenDay;
 import com.example.schedulingsoftware.employee.Employee;
 import com.example.schedulingsoftware.employee.EmployeeService;
 import com.example.schedulingsoftware.schedule.ScheduleService;
@@ -100,6 +101,7 @@ public class DayOffService {
         }
         LocalDate today = LocalDate.now();
         TreeSet<LocalDate> dates = new TreeSet<>(request.dates());
+        boolean emergency = Boolean.TRUE.equals(request.emergency());
 
         // Group the requested dates by week (Monday) so the weekly limit is checked per week.
         Map<LocalDate, Integer> requestedPerWeek = new LinkedHashMap<>();
@@ -112,14 +114,27 @@ public class DayOffService {
             }
             requestedPerWeek.merge(weekStart(date), 1, Integer::sum);
         }
-        requestedPerWeek.forEach((monday, count) -> {
-            long existing = repository.countByEmployeeIdAndOffDateBetweenAndStatusIn(
-                    employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
-            if (existing + count > maxPerWeek) {
-                throw new BusinessRuleException("At most " + maxPerWeek + " days off can be requested in one week (week of "
-                        + monday + " already has " + existing + ").");
+        if (!emergency) {
+            requestedPerWeek.forEach((monday, count) -> {
+                long existing = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalse(
+                        employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
+                if (existing + count > maxPerWeek) {
+                    throw new BusinessRuleException("At most " + maxPerWeek + " days off can be requested in one week "
+                            + "(week of " + monday + " already has " + existing + "). For something urgent, send an "
+                            + "emergency request.");
+                }
+            });
+            // One person off per store per day, so the store's primary and secondary are never both away.
+            List<TakenDay> taken = takenDays(employee, dates.first(), dates.last()).stream()
+                    .filter(t -> dates.contains(t.date()))
+                    .toList();
+            if (!taken.isEmpty()) {
+                TakenDay t = taken.getFirst();
+                throw new BusinessRuleException(t.takenBy() + " already has " + dayName(t.date()) + " off at "
+                        + employee.getHomeStore().getName() + ". Only one person per store can be off on a day. "
+                        + "For something urgent, send an emergency request.");
             }
-        });
+        }
 
         List<DayOffResponse> created = new ArrayList<>();
         for (LocalDate date : dates) {
@@ -127,9 +142,43 @@ public class DayOffService {
             r.setEmployee(employee);
             r.setOffDate(date);
             r.setReason(request.reason());
+            r.setEmergency(emergency);
             created.add(DayOffResponse.from(repository.save(r)));
         }
         return created;
+    }
+
+    /**
+     * Days in the range that a colleague at the same store already has off (pending or approved). Employees can only
+     * ask about themselves; managers about people in their area.
+     */
+    @Transactional(readOnly = true)
+    public List<TakenDay> takenDays(Long employeeId, LocalDate from, LocalDate to) {
+        Employee employee = employeeService.getEmployee(employeeId);
+        CurrentUser user = accessPolicy.current();
+        if (user.isEmployee() && !employee.getId().equals(user.id())) {
+            throw new AccessDeniedException("You can only check your own days off.");
+        }
+        if (!user.isEmployee()) {
+            accessPolicy.requireArea(areaOf(employee));
+        }
+        return takenDays(employee, from, to);
+    }
+
+    private List<TakenDay> takenDays(Employee employee, LocalDate from, LocalDate to) {
+        if (employee.getHomeStore() == null) {
+            return List.of(); // Floaters aren't tied to a store, so nobody blocks them.
+        }
+        return repository.findSameStore(employee.getHomeStore().getId(), employee.getId(), from, to, OPEN_STATUSES)
+                .stream()
+                .map(r -> new TakenDay(r.getOffDate(), r.getEmployee().getFirstName(), r.getStatus()))
+                .toList();
+    }
+
+    private static String dayName(LocalDate date) {
+        return date.getDayOfWeek().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US) + " "
+                + date.getMonth().getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.US) + " "
+                + date.getDayOfMonth();
     }
 
     @Transactional

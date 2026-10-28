@@ -14,6 +14,8 @@ import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -104,6 +106,17 @@ public class SecurityConfig {
             source.registerCorsConfiguration("/api/**", config);
         }
         return source;
+    }
+
+    /**
+     * Sign-in is handled by AuthService with JWTs, so Spring's own username/password store is never used.
+     * Declaring this stops Spring from creating a default user and logging a generated password.
+     */
+    @Bean
+    UserDetailsService userDetailsService() {
+        return username -> {
+            throw new UsernameNotFoundException("Sign in through /api/auth/login.");
+        };
     }
 
     @Bean

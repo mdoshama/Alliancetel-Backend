@@ -27,12 +27,17 @@ public final class AuthDtos {
             Role role,
             Long areaId,
             String areaName,
+            /** Where they normally work (null for floaters and most admins). */
+            Long homeStoreId,
+            String homeStoreName,
             boolean mustChangePassword) {
 
         public static Me from(Employee e) {
             return new Me(e.getId(), e.getEmployeeCode(), e.getFullName(), e.getEmail(), e.getRole(),
                     e.getArea() == null ? null : e.getArea().getId(),
                     e.getArea() == null ? null : e.getArea().getName(),
+                    e.getHomeStore() == null ? null : e.getHomeStore().getId(),
+                    e.getHomeStore() == null ? null : e.getHomeStore().getName(),
                     e.isMustChangePassword());
         }
     }

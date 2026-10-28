@@ -45,6 +45,14 @@ public class DayOffRequest {
     @Column(length = 255)
     private String reason;
 
+    /**
+     * An urgent request: allowed even when someone at the same store is already off that day, and not counted
+     * against the weekly limit. It still needs a manager's approval.
+     */
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("false")
+    private boolean emergency;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DayOffStatus status = DayOffStatus.PENDING;

@@ -224,7 +224,7 @@ class StoreRotationIntegrationTest {
 
     @Test
     void cannotSwapAcrossDaysOrAwayAnApprovedDayOff() {
-        Long request = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday), null)).getFirst().id();
+        Long request = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday), null, null)).getFirst().id();
         dayOffService.approve(request, null);
         ScheduleResponse s = scheduleService.generate(area, monday);
 
@@ -273,6 +273,120 @@ class StoreRotationIntegrationTest {
                 employeeService.changeHomeStore(ana, null).storeRole());
         assertEquals(com.example.schedulingsoftware.employee.StoreRole.SECONDARY,
                 employeeService.changeHomeStore(ana, oceanside).storeRole(), "a floater given a store starts as secondary");
+    }
+
+    @Test
+    void whenThePrimaryIsOffTheSecondaryCoversTheirStore() {
+        // Oceanside: Ana (primary) and Carl (secondary). Chula Vista needs 3 but only has Ben, so on most days
+        // a secondary would be sent there; never on the days Ana is off.
+        Long carl = employee("S-4", Role.EMPLOYEE, oceanside);
+        employeeService.changeHomeStore(ana, oceanside, true);
+        employeeService.changeHomeStore(manager, chulaVista);
+        // Oceanside has no minimum, so only the "cover for the primary" rule can keep Carl there.
+        storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 0, true, null, null));
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 3, true, null, null));
+
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        List<DayCell> anaDays = row(s, ana).days();
+        List<DayCell> carlDays = row(s, carl).days();
+        boolean checkedOne = false;
+        for (int i = 0; i < 7; i++) {
+            assertTrue(anaDays.get(i).type() == DayType.WORK || carlDays.get(i).type() == DayType.WORK,
+                    "Ana and Carl are never both off (" + anaDays.get(i).date() + ")");
+            if (anaDays.get(i).type() != DayType.WORK && carlDays.get(i).type() == DayType.WORK) {
+                assertEquals(oceanside, carlDays.get(i).storeId(), "Carl covers Oceanside on Ana's day off");
+                checkedOne = true;
+            }
+        }
+        assertTrue(checkedOne);
+        // Sanity: on other days Carl is lent to Chula Vista at least once (so the rule above really mattered).
+        assertTrue(carlDays.stream().anyMatch(c -> chulaVista.equals(c.storeId())));
+    }
+
+    @Test
+    void aDayOffCanBeMovedToAnotherDayOfTheWeek() {
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        List<DayCell> days = row(s, ana).days();
+        DayCell off = days.stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
+        DayCell work = days.stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
+
+        ScheduleResponse moved = scheduleService.swapDays(s.id(), off.entryId(), work.entryId());
+        assertEquals(DayType.WORK, cell(moved, ana, off.entryId()).type());
+        assertEquals(work.storeId(), cell(moved, ana, off.entryId()).storeId(), "the new work day keeps the store");
+        assertEquals(DayType.OFF, cell(moved, ana, work.entryId()).type());
+        assertNull(cell(moved, ana, work.entryId()).storeId());
+        assertEquals(6, row(moved, ana).scheduledWorkDays(), "still 6 work days");
+
+        // Two work days, two people, or an approved day off: refused.
+        DayCell otherWork = row(moved, ana).days().stream()
+                .filter(c -> c.type() == DayType.WORK && !c.entryId().equals(off.entryId())).findFirst().orElseThrow();
+        assertThrows(BusinessRuleException.class, () -> scheduleService.swapDays(s.id(), off.entryId(), otherWork.entryId()));
+        DayCell benDay = row(moved, ben).days().getFirst();
+        assertThrows(BusinessRuleException.class, () -> scheduleService.swapDays(s.id(), work.entryId(), benDay.entryId()));
+    }
+
+    @Test
+    void anyTwoDaysCanTradePlaces() {
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        // Ana's first work day and Ben's day off on a different date.
+        DayCell benOff = row(s, ben).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
+        DayCell anaWork = row(s, ana).days().stream()
+                .filter(c -> c.type() == DayType.WORK && !c.date().equals(benOff.date())).findFirst().orElseThrow();
+        ScheduleResponse x = scheduleService.exchange(s.id(), anaWork.entryId(), benOff.entryId(), null);
+        assertEquals(DayType.OFF, cell(x, ana, anaWork.entryId()).type(), "Ana now has that day off");
+        assertNull(cell(x, ana, anaWork.entryId()).storeId());
+        assertEquals(DayType.WORK, cell(x, ben, benOff.entryId()).type(), "Ben works the other day");
+        assertEquals(anaWork.storeId(), cell(x, ben, benOff.entryId()).storeId(), "at Ana's store");
+
+        // Dropping on a store's row on another day: the shift moves to that day and store.
+        DayCell anaWork2 = row(x, ana).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
+        DayCell anaOther = row(x, ana).days().stream()
+                .filter(c -> c.type() == DayType.WORK && !c.date().equals(anaWork2.date())).findFirst().orElseThrow();
+        ScheduleResponse y = scheduleService.exchange(s.id(), anaWork2.entryId(), anaOther.entryId(), chulaVista);
+        assertEquals(chulaVista, cell(y, ana, anaOther.entryId()).storeId());
+
+        // Same day only, on a store row: a plain move.
+        ScheduleResponse z = scheduleService.exchange(s.id(), anaWork2.entryId(), anaWork2.entryId(), chulaVista);
+        assertEquals(chulaVista, cell(z, ana, anaWork2.entryId()).storeId());
+
+        // A day off can't be dropped on a store.
+        DayCell anaOff = row(z, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
+        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), anaOff.entryId(), anaOff.entryId(), oceanside));
+    }
+
+    @Test
+    void movedWorkDaysAvoidClosedStoresAndApprovedDaysOff() {
+        // Chula Vista closed on Sundays.
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 0, true,
+                List.of(new com.example.schedulingsoftware.store.StoreDtos.DayHours(java.time.DayOfWeek.SUNDAY, null, null, true)), null));
+        LocalDate sun = monday.plusDays(6);
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        DayCell benSun = row(s, ben).days().get(6);
+        DayCell anaWeekday = row(s, ana).days().stream()
+                .filter(c -> c.type() == DayType.WORK && !c.date().equals(sun)).findFirst().orElseThrow();
+        // Exactly onto Chula Vista on Sunday: refused.
+        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), anaWeekday.entryId(), benSun.entryId(), chulaVista));
+
+        // Ben (home Chula Vista) moved into Sunday falls back to... nothing open at his home, so an open store is needed.
+        Long req = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday.plusDays(3)), null, null)).getFirst().id();
+        dayOffService.approve(req, null);
+        ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
+        DayCell anaThuOff = row(after, ana).days().get(3);
+        DayCell benWork = row(after, ben).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
+        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), benWork.entryId(), anaThuOff.entryId(), null),
+                "approved day off can't be moved");
+    }
+
+    @Test
+    void anApprovedDayOffCannotBeDraggedAway() {
+        LocalDate wed = monday.plusDays(2);
+        Long req = dayOffService.create(new CreateDayOffRequest(ana, List.of(wed), null, null)).getFirst().id();
+        dayOffService.approve(req, null);
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        DayCell approved = row(s, ana).days().stream().filter(c -> c.date().equals(wed)).findFirst().orElseThrow();
+        DayCell work = row(s, ana).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
+        assertEquals(DayType.REQUESTED_OFF, approved.type());
+        assertThrows(BusinessRuleException.class, () -> scheduleService.swapDays(s.id(), approved.entryId(), work.entryId()));
     }
 
     @Test
