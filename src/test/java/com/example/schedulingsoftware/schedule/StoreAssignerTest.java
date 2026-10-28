@@ -116,6 +116,40 @@ class StoreAssignerTest {
     }
 
     @Test
+    void nobodyIsSentToAClosedStoreAndItsMinimumDoesNotApply() {
+        LocalDate sun = MON.plusDays(6);
+        // B is closed on Sunday: B's own person works at A that day, and nobody is pulled into B.
+        var stores = List.of(new StoreSlot(A, 1), new StoreSlot(B, 2, Set.of(sun)));
+        var result = assigner.assign(stores, List.of(slot(1, sun, A), slot(2, sun, B), slot(3, MON, B), slot(4, MON, A)));
+        assertEquals(new Assignment(A, true), result.get("2-" + sun), "B's person covers A while B is closed");
+        assertEquals(new Assignment(A, false), result.get("1-" + sun));
+        assertEquals(B, result.get("3-" + MON).storeId(), "B is open again on Monday");
+    }
+
+    @Test
+    void aPrimaryStaysAtTheirStoreEvenWhenAnotherIsShort() {
+        // A has a primary and a secondary, B needs 1 and has nobody: the secondary goes, never the primary.
+        var result = assigner.assign(stores(A, 1, B, 1), List.of(manager(1, MON, A), slot(2, MON, A)));
+        assertEquals(new Assignment(A, false), result.get("1-" + MON));
+        assertEquals(new Assignment(B, true), result.get("2-" + MON));
+
+        // With only the primary at A, B stays short rather than moving them.
+        var alone = assigner.assign(stores(A, 0, B, 1), List.of(manager(1, MON, A)));
+        assertEquals(new Assignment(A, false), alone.get("1-" + MON));
+    }
+
+    @Test
+    void floatersFillGapsSoSecondariesStayHome() {
+        // A needs 1 and has two secondaries; B needs 2 and has 1. The floater covers B, so nobody leaves A.
+        var result = assigner.assign(stores(A, 1, B, 2),
+                List.of(slot(1, MON, A), slot(2, MON, B), slot(9, MON, null), slot(3, MON, A)));
+        assertEquals(new Assignment(A, false), result.get("1-" + MON));
+        assertEquals(new Assignment(A, false), result.get("3-" + MON));
+        assertEquals(B, result.get("9-" + MON).storeId());
+        assertEquals(2, countAt(result, B));
+    }
+
+    @Test
     void noStoresMeansNoAssignment() {
         var result = assigner.assign(List.of(), List.of(slot(1, MON, null)));
         assertNull(result.get("1-" + MON).storeId());

@@ -65,6 +65,11 @@ public class Employee {
     @JoinColumn(name = "home_store_id")
     private Store homeStore;
 
+    /** Primary at the home store: never moved away automatically. Ignored without a home store. */
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("false")
+    private boolean primaryAtStore;
+
     /** Normal working days in a Mon-Sun week. Most staff work 6 days (one day off). */
     @Column(nullable = false)
     private int workDaysPerWeek = DEFAULT_WORK_DAYS_PER_WEEK;
@@ -93,5 +98,18 @@ public class Employee {
 
     public String getFullName() {
         return firstName + " " + lastName;
+    }
+
+    /** Primary or secondary at the home store, or a floater without one. */
+    public StoreRole getStoreRole() {
+        if (homeStore == null) {
+            return StoreRole.FLOATER;
+        }
+        return primaryAtStore ? StoreRole.PRIMARY : StoreRole.SECONDARY;
+    }
+
+    /** Primaries and managers stay at their home store unless a manager moves them by hand. */
+    public boolean isAnchoredToStore() {
+        return homeStore != null && (primaryAtStore || role == Role.MANAGER);
     }
 }

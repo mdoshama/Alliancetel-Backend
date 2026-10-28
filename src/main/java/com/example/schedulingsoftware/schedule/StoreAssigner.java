@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.springframework.stereotype.Component;
@@ -22,16 +23,29 @@ import org.springframework.stereotype.Component;
  *       the least-staffed store).</li>
  *   <li>While a store is still below its minimum, one person is moved in from a store that has more than its
  *       minimum (the "third person"). The donor store never drops below its own minimum, managers are never
- *       moved away from their store, and moves are spread so the same person is not rotated every day.</li>
+ *       moved away from their store, primaries are never moved away from their store, floaters are moved
+ *       before secondaries, and moves are spread so the same person is not rotated every day.</li>
  * </ol>
+ * Stores closed on a day are left out for that day: people based there go where they are needed instead.
  * If the area simply does not have enough people working that day, the remaining gaps are left for the
  * schedule to report. The result is deterministic: the same input always gives the same assignment.
  */
 @Component
 public class StoreAssigner {
 
-    /** A store that can be assigned, with its minimum people per day (0 = no minimum). */
-    public record StoreSlot(Long storeId, int minStaffPerDay) {
+    /**
+     * A store that can be assigned, with its minimum people per day (0 = no minimum) and the dates it is closed.
+     * Nobody is sent to a store on a day it is closed, and its minimum does not apply that day.
+     */
+    public record StoreSlot(Long storeId, int minStaffPerDay, Set<LocalDate> closedDates) {
+
+        public StoreSlot(Long storeId, int minStaffPerDay) {
+            this(storeId, minStaffPerDay, Set.of());
+        }
+
+        public StoreSlot {
+            closedDates = closedDates == null ? Set.of() : Set.copyOf(closedDates);
+        }
     }
 
     /**
@@ -39,10 +53,11 @@ public class StoreAssigner {
      *
      * @param key           caller's id for the slot (e.g. the schedule entry id)
      * @param homeStoreId   active home store, or null
+     * @param anchored      primary at their store (or a manager): never moved away from an open home store
      * @param locked        true when a manager set this day by hand; it is never changed
      * @param lockedStoreId the store of a locked slot (may be null)
      */
-    public record WorkSlot(Object key, Long employeeId, LocalDate date, Long homeStoreId, boolean manager,
+    public record WorkSlot(Object key, Long employeeId, LocalDate date, Long homeStoreId, boolean anchored,
             boolean locked, Long lockedStoreId) {
     }
 
@@ -53,16 +68,19 @@ public class StoreAssigner {
     public Map<Object, Assignment> assign(List<StoreSlot> stores, List<WorkSlot> slots) {
         Map<Object, Assignment> result = new LinkedHashMap<>();
         Map<Long, Integer> movesPerEmployee = new HashMap<>();
-        Map<Long, Integer> minimums = new LinkedHashMap<>();
-        stores.stream().sorted(Comparator.comparing(StoreSlot::storeId))
-                .forEach(s -> minimums.put(s.storeId(), Math.max(0, s.minStaffPerDay())));
+        List<StoreSlot> sortedStores = stores.stream().sorted(Comparator.comparing(StoreSlot::storeId)).toList();
 
         Map<LocalDate, List<WorkSlot>> byDay = new TreeMap<>();
         slots.forEach(s -> byDay.computeIfAbsent(s.date(), d -> new ArrayList<>()).add(s));
 
-        for (List<WorkSlot> day : byDay.values()) {
+        byDay.forEach((date, day) -> {
+            // Only stores open that day take part.
+            Map<Long, Integer> minimums = new LinkedHashMap<>();
+            sortedStores.stream()
+                    .filter(s -> !s.closedDates().contains(date))
+                    .forEach(s -> minimums.put(s.storeId(), Math.max(0, s.minStaffPerDay())));
             assignDay(day, minimums, movesPerEmployee, result);
-        }
+        });
         return result;
     }
 
@@ -105,11 +123,13 @@ public class StoreAssigner {
                 break;
             }
             WorkSlot donor = movable.stream()
-                    .filter(s -> !s.manager())
+                    .filter(s -> !s.anchored() || !java.util.Objects.equals(s.homeStoreId(), current.get(s.key())))
                     .filter(s -> !shortStore.equals(current.get(s.key())))
                     .filter(s -> current.get(s.key()) != null)
                     .filter(s -> count.get(current.get(s.key())) > minimums.get(current.get(s.key())))
-                    .min(Comparator.<WorkSlot>comparingInt(s -> moves.getOrDefault(s.employeeId(), 0))
+                    // Floaters are moved before secondaries, then whoever has been moved least.
+                    .min(Comparator.<WorkSlot, Boolean>comparing(s -> s.homeStoreId() != null)
+                            .thenComparingInt(s -> moves.getOrDefault(s.employeeId(), 0))
                             .thenComparing(s -> -(count.get(current.get(s.key())) - minimums.get(current.get(s.key()))))
                             .thenComparing(WorkSlot::employeeId))
                     .orElse(null);

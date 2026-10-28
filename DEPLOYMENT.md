@@ -16,9 +16,126 @@ IdeaProjects/
 
 ---
 
-## Option A — One server with Docker (recommended)
+## Option A — Railway (recommended)
 
-Works on any Linux server with Docker: AWS EC2 or Lightsail, DigitalOcean, Azure, or an office machine.
+On Railway the app runs as three services in one project:
+
+| Service | Built from | Public? |
+|---|---|---|
+| **Postgres** | Railway's PostgreSQL template | No |
+| **backend** | `scheduling-software` (its `Dockerfile` + `railway.json`) | No, private network only |
+| **frontend** | `scheduling-software-frontend` (its `Dockerfile` + `railway.json`) | Yes, this is the website |
+
+Railway builds each service from its `Dockerfile` and checks health using `railway.json`: the backend at
+`/actuator/health`, the site at `/healthz`. Railway gives the website HTTPS automatically.
+
+### 1. Put both projects on GitHub
+
+Create two private repositories (e.g. `alliancetel-backend` and `alliancetel-frontend`) and push:
+
+```bash
+cd ~/IdeaProjects/scheduling-software
+git init && git add . && git commit -m "AllianceTel scheduling backend"
+git branch -M main
+git remote add origin git@github.com:<you>/alliancetel-backend.git
+git push -u origin main
+
+cd ~/IdeaProjects/scheduling-software-frontend      # already a git repository
+git add . && git commit -m "AllianceTel scheduling frontend"
+git branch -M main
+git remote add origin git@github.com:<you>/alliancetel-frontend.git
+git push -u origin main
+```
+
+`.env` files are git-ignored, so no secrets end up on GitHub.
+
+### 2. Create the project and database
+
+1. In Railway: **New Project → Deploy PostgreSQL**. Keep the service name **`Postgres`**.
+2. In the Postgres service, open the **Backups** tab and turn on the **Daily** (and ideally **Weekly**) schedule.
+   Backups are billed like volume storage and can be restored into the same project.
+
+### 3. Add the backend
+
+1. **+ New → GitHub Repo → alliancetel-backend**. In the service **Settings**, rename it to **`backend`**
+   (the frontend refers to it by this name).
+2. **Variables** tab → **Raw Editor**, paste, then fill in the three blanks:
+
+   ```
+   PORT=8080
+   DB_URL=jdbc:postgresql://${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}
+   DB_USERNAME=${{Postgres.PGUSER}}
+   DB_PASSWORD=${{Postgres.PGPASSWORD}}
+   JWT_SECRET=
+   ADMIN_EMAIL=
+   ADMIN_PASSWORD=
+   TZ=America/Los_Angeles
+   ```
+
+   - `JWT_SECRET`: run `openssl rand -base64 48` on your Mac and paste the result.
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD`: the first administrator (8+ characters with a letter and a number).
+     They must choose a new password after the first sign-in.
+   - The `${{Postgres...}}` values are Railway references; Railway fills them in from the database service.
+3. Don't generate a public domain for the backend. It only needs to be reachable from the frontend.
+
+### 4. Add the frontend (the website)
+
+1. **+ New → GitHub Repo → alliancetel-frontend**, and name the service **`frontend`**.
+2. **Variables**:
+
+   ```
+   BACKEND_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:8080
+   ```
+
+   This resolves to `http://backend.railway.internal:8080`; you can also type that directly.
+
+3. **Settings → Networking → Generate Domain** gives a `*.up.railway.app` address with HTTPS. You can also
+   add a custom domain such as `schedule.alliancetel.com`; Railway shows the DNS record to create.
+
+### 5. Deploy and sign in
+
+Railway deploys each service when it's created and on every push to `main`. The first backend build takes a few
+minutes while Maven downloads libraries. When all three services show **Active**, open the site and sign in with
+`ADMIN_EMAIL` / `ADMIN_PASSWORD`. Then set up areas, stores (with minimum staff per day) and employees.
+After the first sign-in you can delete the `ADMIN_PASSWORD` variable.
+
+### Moving your current local data to Railway (optional)
+
+If you'd rather keep what you've already entered on your Mac than start fresh:
+
+1. In the Postgres service, **Settings → Networking**, add **Public Access** (a TCP proxy). This fills in
+   `DATABASE_PUBLIC_URL`; copy it from the **Variables** tab.
+2. On your Mac:
+
+   ```bash
+   pg_dump -U postgres -Fc alliancetel > alliancetel.dump
+   pg_restore --clean --if-exists --no-owner -d "<DATABASE_PUBLIC_URL>" alliancetel.dump
+   ```
+
+3. Remove the public access again (traffic through it is billed) and restart the backend service.
+
+Demo accounts (`…@alliancetel.example`, password `Welcome123`) come across too. Deactivate them in Employees.
+
+### Updating on Railway
+
+Push to `main` in either repository and Railway redeploys that service; the old version keeps serving until the new one passes its health check. The site keeps
+working while the backend redeploys, because nginx looks up the backend's new address every 10 seconds.
+Take a manual backup (Postgres → Backups) before deploying anything that changes stored data.
+
+### Railway troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Backend deploy fails its healthcheck | Backend **Deploy Logs**: the first error line names the missing setting (e.g. `JWT_SECRET`, `ADMIN_PASSWORD`, `DB_URL`). |
+| Site loads but sign-in says "Cannot reach the server" | The backend service must be named `backend` and have `PORT=8080`; the frontend's `BACKEND_URL` must match. |
+| `${{Postgres.PGHOST}}` stays empty | The database service must be named exactly `Postgres` (or change the references to its name). |
+
+---
+
+## Option B — Your own server with Docker
+
+For hosting on your own Linux server instead of Railway (AWS EC2 or Lightsail, DigitalOcean, an office machine).
+This also lets you run the full production setup on your Mac: `docker compose up --build`.
 A small server (2 vCPU, 2–4 GB RAM) is plenty for a few hundred employees.
 
 ### 1. Prepare the server
@@ -85,7 +202,7 @@ The database keeps its data in the `alliancetel_db-data` Docker volume across up
 
 ---
 
-## Option B — Without Docker
+## Option C — Without Docker
 
 1. **Database:** PostgreSQL 14+; create a database and user.
 2. **Backend:** `./mvnw -DskipTests package` produces `target/alliancetel-scheduling.jar` (needs Java 25). Run it with:

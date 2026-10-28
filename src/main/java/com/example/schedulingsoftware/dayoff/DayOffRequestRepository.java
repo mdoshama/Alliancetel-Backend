@@ -14,6 +14,16 @@ public interface DayOffRequestRepository
 
     boolean existsByEmployeeIdAndOffDate(Long employeeId, LocalDate offDate);
 
+    boolean existsByEmployeeIdAndOffDateAndStatus(Long employeeId, LocalDate offDate, DayOffStatus status);
+
+    @Query("""
+            select r from DayOffRequest r join fetch r.employee e
+            where e.area.id = :areaId and r.offDate = :date and r.status in :statuses
+            order by r.id
+            """)
+    List<DayOffRequest> findForAreaOnDate(@Param("areaId") Long areaId, @Param("date") LocalDate date,
+            @Param("statuses") Collection<DayOffStatus> statuses);
+
     long countByEmployeeIdAndOffDateBetweenAndStatusIn(Long employeeId, LocalDate from, LocalDate to,
             Collection<DayOffStatus> statuses);
 

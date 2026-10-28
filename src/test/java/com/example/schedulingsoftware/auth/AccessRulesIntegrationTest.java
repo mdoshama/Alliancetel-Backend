@@ -134,6 +134,6 @@ class AccessRulesIntegrationTest {
 
     private CredentialsResponse create(String code, Role role, Long areaId) {
         return employeeService.create(new EmployeeRequest(code, "Test", code, code.toLowerCase() + "@test.example",
-                null, role, areaId, null, 6, true));
+                null, role, areaId, null, 6, true, null));
     }
 }

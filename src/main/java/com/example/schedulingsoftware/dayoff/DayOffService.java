@@ -27,6 +27,7 @@ import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
 import com.example.schedulingsoftware.employee.Employee;
 import com.example.schedulingsoftware.employee.EmployeeService;
+import com.example.schedulingsoftware.schedule.ScheduleService;
 
 import jakarta.persistence.criteria.Predicate;
 
@@ -38,15 +39,18 @@ public class DayOffService {
     private final DayOffRequestRepository repository;
     private final EmployeeService employeeService;
     private final AccessPolicy accessPolicy;
+    private final ScheduleService scheduleService;
     private final int maxPerWeek;
 
     public DayOffService(DayOffRequestRepository repository,
             EmployeeService employeeService,
             AccessPolicy accessPolicy,
+            ScheduleService scheduleService,
             @Value("${alliancetel.scheduling.max-day-off-requests-per-week:2}") int maxPerWeek) {
         this.repository = repository;
         this.employeeService = employeeService;
         this.accessPolicy = accessPolicy;
+        this.scheduleService = scheduleService;
         this.maxPerWeek = maxPerWeek;
     }
 
@@ -130,7 +134,10 @@ public class DayOffService {
 
     @Transactional
     public DayOffResponse approve(Long id, String note) {
-        return review(id, DayOffStatus.APPROVED, note);
+        DayOffResponse approved = review(id, DayOffStatus.APPROVED, note);
+        // If that week's schedule was already made, the person must not stay scheduled to work that day.
+        DayOffRequest r = get(id);
+        return approved.withScheduleUpdate(scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate()));
     }
 
     @Transactional

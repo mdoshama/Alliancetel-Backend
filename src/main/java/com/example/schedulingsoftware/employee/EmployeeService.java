@@ -118,10 +118,22 @@ public class EmployeeService {
      */
     @Transactional
     public EmployeeResponse changeHomeStore(Long id, Long storeId) {
+        return changeHomeStore(id, storeId, null);
+    }
+
+    /** Same, also setting primary (true) or secondary (false); null keeps the current choice. */
+    @Transactional
+    public EmployeeResponse changeHomeStore(Long id, Long storeId, Boolean primary) {
         Employee employee = getEmployee(id);
         Long areaId = employee.getArea() == null ? null : employee.getArea().getId();
         accessPolicy.requireManagerOf(areaId);
         employee.setHomeStore(storeId == null ? null : storeService.requireAssignable(storeId, areaId));
+        if (primary != null) {
+            employee.setPrimaryAtStore(primary);
+        }
+        if (employee.getHomeStore() == null) {
+            employee.setPrimaryAtStore(false); // Floaters are never primary.
+        }
         return EmployeeResponse.from(employee);
     }
 
@@ -159,6 +171,12 @@ public class EmployeeService {
         employee.setArea(request.areaId() == null ? null : areaService.getArea(request.areaId()));
         employee.setHomeStore(request.homeStoreId() == null ? null
                 : storeService.requireAssignable(request.homeStoreId(), request.areaId()));
+        if (request.primaryAtStore() != null) {
+            employee.setPrimaryAtStore(request.primaryAtStore());
+        }
+        if (employee.getHomeStore() == null) {
+            employee.setPrimaryAtStore(false);
+        }
         employee.setWorkDaysPerWeek(request.workDaysPerWeek());
         if (request.active() != null) {
             employee.setActive(request.active());

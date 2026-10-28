@@ -101,6 +101,8 @@ public class DemoDataSeeder implements ApplicationRunner {
                     .toList();
             for (int i = 0; i < staff.size(); i++) {
                 staff.get(i).setHomeStore(stores.get(i % stores.size()));
+                // The first person at each store is its primary; the rest are secondaries.
+                staff.get(i).setPrimaryAtStore(i < stores.size());
             }
             log.info("Added {} demo stores to {} and assigned {} staff", stores.size(), area.getName(), staff.size());
         }

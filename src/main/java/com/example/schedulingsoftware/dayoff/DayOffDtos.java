@@ -37,7 +37,14 @@ public final class DayOffDtos {
             DayOffStatus status,
             String reviewNote,
             Instant reviewedAt,
-            Instant createdAt) {
+            Instant createdAt,
+            /** After approval: how that week's existing schedule was updated, or null if there was none. */
+            String scheduleUpdate) {
+
+        public DayOffResponse withScheduleUpdate(String update) {
+            return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
+                    reason, status, reviewNote, reviewedAt, createdAt, update);
+        }
 
         public static DayOffResponse from(DayOffRequest r) {
             var e = r.getEmployee();
@@ -54,7 +61,8 @@ public final class DayOffDtos {
                     r.getStatus(),
                     r.getReviewNote(),
                     r.getReviewedAt(),
-                    r.getCreatedAt());
+                    r.getCreatedAt(),
+                    null);
         }
     }
 }

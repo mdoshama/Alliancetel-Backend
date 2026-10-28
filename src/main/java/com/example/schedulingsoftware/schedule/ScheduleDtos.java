@@ -4,7 +4,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
+import java.time.LocalTime;
+
 import com.example.schedulingsoftware.employee.Role;
+import com.example.schedulingsoftware.store.StoreDtos.DayHours;
 
 import jakarta.validation.constraints.NotNull;
 
@@ -28,12 +31,18 @@ public final class ScheduleDtos {
     public record MoveForWeekRequest(@NotNull Long employeeId, @NotNull Long storeId) {
     }
 
-    public record StoreRef(Long id, String name, String code, String label, int minStaffPerDay) {
+    /** {@code hours} has seven entries, Monday first. */
+    public record StoreRef(Long id, String name, String code, String label, int minStaffPerDay, List<DayHours> hours,
+            String color) {
     }
 
     /** minStaffPerDay is 0 for the "no store assigned" row. */
     public record StoreCoverage(Long storeId, String storeName, String label, int minStaffPerDay,
-            List<Integer> dailyHeadCount) {
+            List<Integer> dailyHeadCount,
+            /** The store's hours on each date of the week (same order as dailyHeadCount). */
+            List<DayHours> dailyHours,
+            /** The store's color; null for the "no store assigned" row. */
+            String color) {
     }
 
     /** A store that has fewer people than its minimum on a day. */
@@ -47,9 +56,16 @@ public final class ScheduleDtos {
             Long storeId,
             String storeName,
             String storeLabel,
+            /** The store's color, e.g. "#2563EB"; null without a store. */
+            String storeColor,
             /** Moved away from the home store automatically to cover another store's minimum. */
             boolean autoAssigned,
-            boolean manuallyEdited) {
+            boolean manuallyEdited,
+            /** The store's hours that day, i.e. the shift; null when there is no store. */
+            LocalTime opensAt,
+            LocalTime closesAt,
+            /** The assigned store is closed that day (e.g. hours changed after it was set by hand). */
+            boolean storeClosed) {
     }
 
     public record EmployeeRow(
@@ -59,9 +75,51 @@ public final class ScheduleDtos {
             Role role,
             Long homeStoreId,
             String homeStoreName,
+            /** Primary or secondary at the home store, or floater. */
+            com.example.schedulingsoftware.employee.StoreRole storeRole,
             int expectedWorkDays,
             int scheduledWorkDays,
             List<DayCell> days) {
+    }
+
+    /** How approving a day off would affect staffing. */
+    public enum ImpactLevel {
+        /** Every store still meets its minimum with people to spare. */
+        OK,
+        /** Every store still meets its minimum, but with nobody to spare that day. */
+        TIGHT,
+        /** At least one store would drop below its minimum. */
+        SHORT
+    }
+
+    /** A store below its minimum on a day. */
+    public record Shortage(String storeName, LocalDate date, int scheduled, int required) {
+    }
+
+    public record DayOffImpact(
+            Long requestId,
+            String employeeName,
+            LocalDate date,
+            ImpactLevel level,
+            /** One sentence for the reviewer. */
+            String summary,
+            /** People working in the area that day, before and after approving. */
+            int workingBefore,
+            int workingAfter,
+            /** Sum of the minimums of the stores open that day. */
+            int neededThatDay,
+            /** Their regular day off that becomes a work day instead, so they keep their usual days; may be null. */
+            LocalDate replacementWorkDay,
+            /** Status of that week's schedule, or null if it has not been made yet. */
+            ScheduleStatus scheduleStatus,
+            /** Others already approved off that day. */
+            List<String> alreadyOff,
+            /** Others who also asked for that day and are still waiting. */
+            List<String> alsoRequested,
+            /** Store-days that would fall below their minimum, or further below it (any day that week). */
+            List<Shortage> newShortages,
+            /** Shortages that week that exist anyway, whatever the decision. */
+            int existingShortages) {
     }
 
     public record ScheduleResponse(

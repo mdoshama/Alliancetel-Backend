@@ -29,7 +29,9 @@ import com.example.schedulingsoftware.schedule.ScheduleDtos.DayCell;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.EmployeeRow;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.ScheduleResponse;
 import com.example.schedulingsoftware.schedule.ScheduleService;
+import com.example.schedulingsoftware.store.StoreDtos.DayHours;
 import com.example.schedulingsoftware.store.StoreDtos.StoreRequest;
+import com.example.schedulingsoftware.store.StoreDtos.StoreResponse;
 import com.example.schedulingsoftware.support.TestUsers;
 
 @SpringBootTest
@@ -62,9 +64,9 @@ class StoreRotationIntegrationTest {
         TestUsers.signInAsAdmin();
         area = areaService.create(new AreaRequest("Store Test Area", null, true)).id();
         otherArea = areaService.create(new AreaRequest("Other Area", null, true)).id();
-        oceanside = storeService.create(new StoreRequest(area, "Oceanside", "ocn", null, null, true)).id();
-        chulaVista = storeService.create(new StoreRequest(area, "Chula Vista", "CHV", null, null, true)).id();
-        otherAreaStore = storeService.create(new StoreRequest(otherArea, "Hollywood", "HWD", null, null, true)).id();
+        oceanside = storeService.create(new StoreRequest(area, "Oceanside", "ocn", null, null, true, null, null)).id();
+        chulaVista = storeService.create(new StoreRequest(area, "Chula Vista", "CHV", null, null, true, null, null)).id();
+        otherAreaStore = storeService.create(new StoreRequest(otherArea, "Hollywood", "HWD", null, null, true, null, null)).id();
         ana = employee("S-1", Role.EMPLOYEE, oceanside);
         ben = employee("S-2", Role.EMPLOYEE, chulaVista);
         manager = employee("S-3", Role.MANAGER, oceanside);
@@ -79,9 +81,90 @@ class StoreRotationIntegrationTest {
     void storeCodesAreUppercasedAndNamesUniquePerArea() {
         assertEquals("OCN", storeService.getStore(oceanside).getCode());
         assertThrows(BusinessRuleException.class,
-                () -> storeService.create(new StoreRequest(area, "oceanside", null, null, null, true)));
+                () -> storeService.create(new StoreRequest(area, "oceanside", null, null, null, true, null, null)));
         // Same name in a different area is fine.
-        storeService.create(new StoreRequest(otherArea, "Oceanside", null, null, null, true));
+        storeService.create(new StoreRequest(otherArea, "Oceanside", null, null, null, true, null, null));
+    }
+
+    @Test
+    void storesOpenTenToEightUnlessHoursAreSet() {
+        StoreResponse s = storeService.list(area).stream().filter(x -> x.id().equals(oceanside)).findFirst().orElseThrow();
+        assertEquals(7, s.hours().size());
+        assertEquals(java.time.DayOfWeek.MONDAY, s.hours().getFirst().day());
+        assertTrue(s.hours().stream().allMatch(h -> !h.closed()
+                && h.opensAt().equals(java.time.LocalTime.of(10, 0)) && h.closesAt().equals(java.time.LocalTime.of(20, 0))));
+    }
+
+    @Test
+    void hoursCanDifferByDayAndBadHoursAreRejected() {
+        var t = (java.util.function.Function<String, java.time.LocalTime>) java.time.LocalTime::parse;
+        List<DayHours> week = new java.util.ArrayList<>();
+        for (java.time.DayOfWeek d : java.time.DayOfWeek.values()) {
+            week.add(d == java.time.DayOfWeek.SUNDAY ? new DayHours(d, t.apply("11:00"), t.apply("19:00"), false)
+                    : new DayHours(d, t.apply("09:00"), t.apply("19:00"), false));
+        }
+        StoreResponse saved = storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, null, true, week, null));
+        assertEquals(t.apply("09:00"), saved.hours().getFirst().opensAt());
+        assertEquals(t.apply("11:00"), saved.hours().get(6).opensAt());
+        assertEquals(t.apply("19:00"), saved.hours().get(6).closesAt());
+
+        // Leaving hours out keeps them.
+        StoreResponse kept = storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 2, true, null, null));
+        assertEquals(t.apply("11:00"), kept.hours().get(6).opensAt());
+
+        assertThrows(BusinessRuleException.class, () -> storeService.update(oceanside, new StoreRequest(area, "Oceanside",
+                "OCN", null, null, true, List.of(new DayHours(java.time.DayOfWeek.MONDAY, t.apply("20:00"), t.apply("10:00"), false)), null)));
+        assertThrows(BusinessRuleException.class, () -> storeService.update(oceanside, new StoreRequest(area, "Oceanside",
+                "OCN", null, null, true, List.of(new DayHours(java.time.DayOfWeek.MONDAY, null, null, false)), null)));
+        assertThrows(BusinessRuleException.class, () -> storeService.update(oceanside, new StoreRequest(area, "Oceanside",
+                "OCN", null, null, true, List.of(new DayHours(java.time.DayOfWeek.MONDAY, null, null, true),
+                        new DayHours(java.time.DayOfWeek.MONDAY, null, null, true)), null)));
+    }
+
+    @Test
+    void closedDaysHaveNoMinimumAndNobodyIsSentThere() {
+        // Chula Vista needs 1 a day but is closed on Sundays.
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 1, true,
+                List.of(new DayHours(java.time.DayOfWeek.SUNDAY, null, null, true)), null));
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        LocalDate sunday = monday.plusDays(6);
+        for (EmployeeRow r : s.rows()) {
+            DayCell sun = r.days().stream().filter(c -> c.date().equals(sunday)).findFirst().orElseThrow();
+            assertTrue(sun.storeId() == null || !sun.storeId().equals(chulaVista), "nobody at a closed store");
+            if (sun.storeId() != null) {
+                assertEquals(java.time.LocalTime.of(10, 0), sun.opensAt(), "the shift follows the store's hours");
+            }
+        }
+        assertTrue(s.coverageGaps().stream().noneMatch(g -> g.date().equals(sunday) && g.storeId().equals(chulaVista)));
+        var chv = s.storeCoverage().stream().filter(c -> chulaVista.equals(c.storeId())).findFirst().orElseThrow();
+        assertTrue(chv.dailyHours().get(6).closed());
+
+        // Setting someone there by hand on Sunday is refused.
+        DayCell benSunday = row(s, ben).days().stream().filter(c -> c.date().equals(sunday)).findFirst().orElseThrow();
+        assertThrows(BusinessRuleException.class,
+                () -> scheduleService.updateEntry(s.id(), benSunday.entryId(), DayType.WORK, chulaVista));
+    }
+
+    @Test
+    void newStoresGetADifferentColorAndColorsCanBeChosen() {
+        var stores = storeService.list(area);
+        String ocn = stores.stream().filter(x -> x.id().equals(oceanside)).findFirst().orElseThrow().color();
+        String chv = stores.stream().filter(x -> x.id().equals(chulaVista)).findFirst().orElseThrow().color();
+        assertTrue(ocn.matches("#[0-9A-F]{6}"));
+        assertTrue(!ocn.equals(chv), "stores in one area start with different colors");
+
+        StoreResponse saved = storeService.update(oceanside,
+                new StoreRequest(area, "Oceanside", "OCN", null, null, true, null, "#ff8800"));
+        assertEquals("#FF8800", saved.color());
+        // Leaving the color out keeps it.
+        assertEquals("#FF8800", storeService.update(oceanside,
+                new StoreRequest(area, "Oceanside", "OCN", null, 2, true, null, null)).color());
+
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        DayCell work = row(s, ana).days().stream().filter(c -> c.storeId() != null && c.storeId().equals(oceanside))
+                .findFirst().orElseThrow();
+        assertEquals("#FF8800", work.storeColor());
+        assertEquals("#FF8800", s.stores().stream().filter(x -> x.id().equals(oceanside)).findFirst().orElseThrow().color());
     }
 
     @Test
@@ -94,7 +177,7 @@ class StoreRotationIntegrationTest {
     @Test
     void generatedScheduleUsesHomeStoresAndCountsPerStore() {
         // No minimum at Chula Vista, so nobody needs to be moved and everyone stays at their home store.
-        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 0, true));
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 0, true, null, null));
         ScheduleResponse s = scheduleService.generate(area, monday);
         for (DayCell cell : row(s, ana).days()) {
             if (cell.type() == DayType.WORK) {
@@ -178,6 +261,59 @@ class StoreRotationIntegrationTest {
     }
 
     @Test
+    void storeRolesPrimarySecondaryAndFloater() {
+        assertEquals(com.example.schedulingsoftware.employee.StoreRole.SECONDARY,
+                employeeService.changeHomeStore(ana, oceanside).storeRole());
+        assertEquals(com.example.schedulingsoftware.employee.StoreRole.PRIMARY,
+                employeeService.changeHomeStore(ana, oceanside, true).storeRole());
+        // Moving a primary's home store keeps them primary; clearing it makes them a floater.
+        assertEquals(com.example.schedulingsoftware.employee.StoreRole.PRIMARY,
+                employeeService.changeHomeStore(ana, chulaVista).storeRole());
+        assertEquals(com.example.schedulingsoftware.employee.StoreRole.FLOATER,
+                employeeService.changeHomeStore(ana, null).storeRole());
+        assertEquals(com.example.schedulingsoftware.employee.StoreRole.SECONDARY,
+                employeeService.changeHomeStore(ana, oceanside).storeRole(), "a floater given a store starts as secondary");
+    }
+
+    @Test
+    void generateAndAutoFillNeverMoveAPrimary() {
+        // Oceanside: Ana (primary) and the manager. Chula Vista needs 3 but only has Ben.
+        employeeService.changeHomeStore(ana, oceanside, true);
+        storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 0, true, null, null));
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 3, true, null, null));
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        assertEquals(com.example.schedulingsoftware.employee.StoreRole.PRIMARY, row(s, ana).storeRole());
+        for (DayCell c : row(s, ana).days()) {
+            if (c.type() == DayType.WORK) {
+                assertEquals(oceanside, c.storeId(), "the primary stays at Oceanside on " + c.date());
+                assertTrue(!c.autoAssigned());
+            }
+        }
+        ScheduleResponse filled = scheduleService.autoAssignStores(s.id());
+        assertTrue(row(filled, ana).days().stream().filter(c -> c.type() == DayType.WORK)
+                .allMatch(c -> oceanside.equals(c.storeId())));
+        assertTrue(!filled.coverageGaps().isEmpty(), "Chula Vista is reported short instead");
+
+        // A manager can still move them by hand.
+        DayCell work = row(filled, ana).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
+        assertEquals(chulaVista, cell(scheduleService.updateEntry(s.id(), work.entryId(), DayType.WORK, chulaVista),
+                ana, work.entryId()).storeId());
+    }
+
+    @Test
+    void aWorkDayNeedsAStore() {
+        employeeService.changeHomeStore(ana, null);
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        DayCell off = row(s, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
+        // No home store to fall back on, so the store must be given.
+        BusinessRuleException e = assertThrows(BusinessRuleException.class,
+                () -> scheduleService.updateEntry(s.id(), off.entryId(), DayType.WORK, null));
+        assertTrue(e.getMessage().contains("Pick the store"), e.getMessage());
+        assertEquals(chulaVista, cell(scheduleService.updateEntry(s.id(), off.entryId(), DayType.WORK, chulaVista),
+                ana, off.entryId()).storeId());
+    }
+
+    @Test
     void managersRotateOnlyTheirOwnAreaAndEmployeesCannot() {
         Long otherEmployee = employee("S-9", Role.EMPLOYEE, null, otherArea);
 
@@ -194,8 +330,8 @@ class StoreRotationIntegrationTest {
     @Test
     void storesBelowMinimumAreFilledAutomaticallyAndRemainingGapsReported() {
         // Oceanside needs 3 but only Ana and the manager are based there; Chula Vista (Ben) needs nobody.
-        storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 3, true));
-        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 0, true));
+        storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 3, true, null, null));
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 0, true, null, null));
         ScheduleResponse s = scheduleService.generate(area, monday);
 
         for (int day = 0; day < 7; day++) {
@@ -219,14 +355,14 @@ class StoreRotationIntegrationTest {
 
     @Test
     void autoFillKeepsManualChangesAndAppliesNewMinimums() {
-        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 0, true));
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 0, true, null, null));
         ScheduleResponse s = scheduleService.generate(area, monday);
         int day = firstDayBothWork(s);
         // A manager pins Ana to Chula Vista on one day.
         scheduleService.updateEntry(s.id(), row(s, ana).days().get(day).entryId(), DayType.WORK, chulaVista);
 
         // Oceanside now needs 2 and Chula Vista needs nothing: Ben should be pulled in where Oceanside is short.
-        storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 2, true));
+        storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 2, true, null, null));
         ScheduleResponse after = scheduleService.autoAssignStores(s.id());
 
         DayCell pinned = row(after, ana).days().get(day);
@@ -244,7 +380,7 @@ class StoreRotationIntegrationTest {
     @Test
     void usedStoresCannotBeDeleted() {
         assertThrows(BusinessRuleException.class, () -> storeService.delete(oceanside));
-        Long unused = storeService.create(new StoreRequest(area, "Pop-up", null, null, null, true)).id();
+        Long unused = storeService.create(new StoreRequest(area, "Pop-up", null, null, null, true, null, null)).id();
         storeService.delete(unused);
     }
 
@@ -254,7 +390,7 @@ class StoreRotationIntegrationTest {
 
     private Long employee(String code, Role role, Long storeId, Long areaId) {
         return employeeService.create(new EmployeeRequest(code, "Test", code, code.toLowerCase() + "@test.example",
-                null, role, areaId, storeId, 6, true)).employee().id();
+                null, role, areaId, storeId, 6, true, null)).employee().id();
     }
 
     private static EmployeeRow row(ScheduleResponse s, Long employeeId) {

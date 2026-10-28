@@ -1,6 +1,11 @@
 package com.example.schedulingsoftware.store;
 
+import java.time.DayOfWeek;
+import java.time.format.TextStyle;
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 import java.util.Map;
 
@@ -14,6 +19,7 @@ import com.example.schedulingsoftware.common.BusinessRuleException;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.employee.EmployeeRepository;
 import com.example.schedulingsoftware.schedule.ScheduleEntryRepository;
+import com.example.schedulingsoftware.store.StoreDtos.DayHours;
 import com.example.schedulingsoftware.store.StoreDtos.StoreRequest;
 import com.example.schedulingsoftware.store.StoreDtos.StoreResponse;
 
@@ -54,6 +60,10 @@ public class StoreService {
         if (request.active() != null) {
             store.setActive(request.active());
         }
+        if (request.hours() != null) {
+            store.replaceHours(toHours(request.hours()));
+        }
+        store.setColor(request.color() != null ? normalizeColor(request.color()) : unusedColor(area.getId()));
         return StoreResponse.from(storeRepository.save(store), 0);
     }
 
@@ -79,6 +89,12 @@ public class StoreService {
         }
         if (request.active() != null) {
             store.setActive(request.active());
+        }
+        if (request.hours() != null) {
+            store.replaceHours(toHours(request.hours()));
+        }
+        if (request.color() != null) {
+            store.setColor(normalizeColor(request.color()));
         }
         return StoreResponse.from(store, staff);
     }
@@ -108,6 +124,46 @@ public class StoreService {
             throw new BusinessRuleException(store.getName() + " is inactive.");
         }
         return store;
+    }
+
+    /** Checks the submitted hours: each weekday at most once, and closing time after opening time. */
+    static List<StoreDayHours> toHours(List<DayHours> days) {
+        Set<DayOfWeek> seen = EnumSet.noneOf(DayOfWeek.class);
+        List<StoreDayHours> result = new ArrayList<>();
+        for (DayHours d : days) {
+            if (d == null || d.day() == null) {
+                throw new BusinessRuleException("Each opening-hours entry needs a day.");
+            }
+            String dayName = d.day().getDisplayName(TextStyle.FULL, Locale.US);
+            if (!seen.add(d.day())) {
+                throw new BusinessRuleException(dayName + " is listed twice in the opening hours.");
+            }
+            if (d.closed()) {
+                result.add(StoreDayHours.closedOn(d.day()));
+                continue;
+            }
+            if (d.opensAt() == null || d.closesAt() == null) {
+                throw new BusinessRuleException("Enter opening and closing times for " + dayName + ", or mark it closed.");
+            }
+            if (!d.closesAt().isAfter(d.opensAt())) {
+                throw new BusinessRuleException("On " + dayName + " the closing time must be after the opening time.");
+            }
+            result.add(StoreDayHours.open(d.day(), d.opensAt(), d.closesAt()));
+        }
+        return result;
+    }
+
+    /** The first palette color no other store in the area is using (cycling once every color is taken). */
+    private String unusedColor(Long areaId) {
+        List<Store> existing = storeRepository.findByAreaIdOrderByNameAsc(areaId);
+        Set<String> used = new java.util.HashSet<>();
+        existing.forEach(s -> used.add(s.getDisplayColor()));
+        return Store.PALETTE.stream().filter(c -> !used.contains(c)).findFirst()
+                .orElse(Store.PALETTE.get(existing.size() % Store.PALETTE.size()));
+    }
+
+    private static String normalizeColor(String color) {
+        return color.trim().toUpperCase(Locale.ROOT);
     }
 
     private static String normalizeCode(String code) {

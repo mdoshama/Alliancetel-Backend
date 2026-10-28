@@ -1,7 +1,7 @@
 # AllianceTel scheduling API: build with Maven, run on a slim Java runtime as a non-root user.
 # syntax=docker/dockerfile:1
 
-FROM maven:3.9-eclipse-temurin-25 AS build
+FROM maven:3.10-eclipse-temurin-25-noble AS build
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src

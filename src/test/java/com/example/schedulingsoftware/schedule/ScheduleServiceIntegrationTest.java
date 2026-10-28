@@ -93,7 +93,7 @@ class ScheduleServiceIntegrationTest {
 
     private Long employee(String code, String name, Long areaId) {
         return employeeService.create(new EmployeeRequest(code, name, "Tester", code.toLowerCase() + "@test.example",
-                null, Role.EMPLOYEE, areaId, null, 6, true)).employee().id();
+                null, Role.EMPLOYEE, areaId, null, 6, true, null)).employee().id();
     }
 
     private static EmployeeRow row(ScheduleResponse s, Long employeeId) {

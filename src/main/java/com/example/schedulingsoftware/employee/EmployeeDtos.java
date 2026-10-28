@@ -24,11 +24,13 @@ public final class EmployeeDtos {
             Long areaId,
             Long homeStoreId,
             @NotNull @Min(1) @Max(7) Integer workDaysPerWeek,
-            Boolean active) {
+            Boolean active,
+            /** Primary at the home store (true) or secondary (false). Null keeps the current setting. */
+            Boolean primaryAtStore) {
     }
 
     /** Quick reassignment of someone's home store; null clears it. */
-    public record HomeStoreRequest(Long storeId) {
+    public record HomeStoreRequest(Long storeId, Boolean primary) {
     }
 
     public record EmployeeResponse(
@@ -44,6 +46,7 @@ public final class EmployeeDtos {
             String areaName,
             Long homeStoreId,
             String homeStoreName,
+            StoreRole storeRole,
             int workDaysPerWeek,
             boolean active,
             boolean loginEnabled,
@@ -63,6 +66,7 @@ public final class EmployeeDtos {
                     e.getArea() == null ? null : e.getArea().getName(),
                     e.getHomeStore() == null ? null : e.getHomeStore().getId(),
                     e.getHomeStore() == null ? null : e.getHomeStore().getName(),
+                    e.getStoreRole(),
                     e.getWorkDaysPerWeek(),
                     e.isActive(),
                     e.getPasswordHash() != null,

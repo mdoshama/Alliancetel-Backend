@@ -57,7 +57,7 @@ public class EmployeeController {
 
     @PatchMapping("/{id}/home-store")
     public EmployeeResponse changeHomeStore(@PathVariable Long id, @RequestBody HomeStoreRequest request) {
-        return employeeService.changeHomeStore(id, request.storeId());
+        return employeeService.changeHomeStore(id, request.storeId(), request.primary());
     }
 
     @PostMapping("/{id}/reset-password")

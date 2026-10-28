@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.ReviewDayOffRequest;
+import com.example.schedulingsoftware.schedule.ScheduleDtos.DayOffImpact;
+import com.example.schedulingsoftware.schedule.ScheduleService;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,13 @@ import lombok.RequiredArgsConstructor;
 public class DayOffController {
 
     private final DayOffService dayOffService;
+    private final ScheduleService scheduleService;
+
+    /** What approving this request would do to staffing that week (managers and admins). */
+    @GetMapping("/{id}/impact")
+    public DayOffImpact impact(@PathVariable Long id) {
+        return scheduleService.dayOffImpact(id);
+    }
 
     @GetMapping
     public List<DayOffResponse> list(
