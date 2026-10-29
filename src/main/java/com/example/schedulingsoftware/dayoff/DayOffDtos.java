@@ -24,7 +24,34 @@ public final class DayOffDtos {
     }
 
     /** A day someone at the same store already has off (pending or approved), so a normal request can't take it. */
-    public record TakenDay(LocalDate date, String takenBy, DayOffStatus status) {
+    /**
+     * A day that a normal request can't have: a colleague at the same store is off (takenBy, status), or the area
+     * has nobody to spare (full = true, takenBy null).
+     */
+    public record TakenDay(LocalDate date, String takenBy, DayOffStatus status, boolean full) {
+        public TakenDay(LocalDate date, String takenBy, DayOffStatus status) {
+            this(date, takenBy, status, false);
+        }
+
+        static TakenDay full(LocalDate date) {
+            return new TakenDay(date, null, null, true);
+        }
+    }
+
+    /**
+     * Approve several requests at once.
+     *
+     * @param onlyIfCovered skip (leave pending) any request that would leave a store below its minimum
+     */
+    public record ApproveManyRequest(@jakarta.validation.constraints.NotEmpty
+            @jakarta.validation.constraints.Size(max = 200) List<Long> ids, Boolean onlyIfCovered) {
+    }
+
+    /** A request left pending by "approve all", and why. */
+    public record SkippedRequest(Long id, String employeeName, LocalDate date, String reason) {
+    }
+
+    public record ApproveManyResult(List<DayOffResponse> approved, List<SkippedRequest> skipped) {
     }
 
     public record ReviewDayOffRequest(@Size(max = 255) String note) {

@@ -72,7 +72,18 @@ public final class ScheduleDtos {
             LocalTime opensAt,
             LocalTime closesAt,
             /** The assigned store is closed that day (e.g. hours changed after it was set by hand). */
-            boolean storeClosed) {
+            boolean storeClosed,
+            /** A pending day-off request for this day (managers only), or null. */
+            WeekRequest request) {
+    }
+
+    /**
+     * A day-off request waiting for a decision, shown on the week's schedule.
+     *
+     * @param canReview the signed-in user may approve it (managers can't decide their own)
+     */
+    public record WeekRequest(Long id, Long employeeId, String employeeName, LocalDate date, boolean emergency,
+            String reason, boolean canReview) {
     }
 
     public record EmployeeRow(
@@ -100,6 +111,17 @@ public final class ScheduleDtos {
     }
 
     /** A store below its minimum on a day. */
+    /**
+     * Whether one more person can be off in an area on a day without leaving the stores below their minimums.
+     *
+     * @param needed  people the area's open stores need that day (sum of minimums)
+     * @param working people who would still work if this person is off
+     * @param offNames others already off or asking (first names)
+     * @param full    true when this day off would leave the area short
+     */
+    public record DayRoom(LocalDate date, int needed, int working, List<String> offNames, boolean full) {
+    }
+
     public record Shortage(String storeName, LocalDate date, int scheduled, int required) {
     }
 
@@ -150,6 +172,8 @@ public final class ScheduleDtos {
             List<StoreCoverage> storeCoverage,
             /** Every store-day below its minimum, in date then store order. Empty means fully covered. */
             List<CoverageGap> coverageGaps,
-            List<EmployeeRow> rows) {
+            List<EmployeeRow> rows,
+            /** Pending day-off requests for this week, by day (managers only; empty for employees). */
+            List<WeekRequest> requests) {
     }
 }

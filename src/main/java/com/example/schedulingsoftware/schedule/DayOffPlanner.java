@@ -8,8 +8,8 @@ import java.util.Set;
 /**
  * Applies an approved day off to one person's week.
  *
- * <p>The day becomes {@link DayType#REQUESTED_OFF}. An approved day replaces the regular weekly day off (the same
- * rule {@link ScheduleGenerator} uses), so if the person now works fewer days than usual, one of their regular days
+ * <p>The day becomes {@link DayType#REQUESTED_OFF}. Schedules now start with everyone working, so callers pass 0 work
+ * days and nothing is given back. With a positive count, if the person now works fewer days than that, one of their days
  * off becomes a work day again: the one where the fewest people are working. Days a manager set by hand are never
  * changed.
  */

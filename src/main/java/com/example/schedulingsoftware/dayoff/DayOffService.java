@@ -25,11 +25,14 @@ import com.example.schedulingsoftware.auth.CurrentUser;
 import com.example.schedulingsoftware.common.BusinessRuleException;
 import com.example.schedulingsoftware.common.PageResponse;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
+import com.example.schedulingsoftware.dayoff.DayOffDtos.ApproveManyResult;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
+import com.example.schedulingsoftware.dayoff.DayOffDtos.SkippedRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.TakenDay;
 import com.example.schedulingsoftware.employee.Employee;
 import com.example.schedulingsoftware.employee.EmployeeService;
+import com.example.schedulingsoftware.schedule.ScheduleDtos.DayRoom;
 import com.example.schedulingsoftware.schedule.ScheduleService;
 
 import jakarta.persistence.criteria.Predicate;
@@ -151,7 +154,7 @@ public class DayOffService {
                 }
             });
             // One person off per store per day, so the store's primary and secondary are never both away.
-            List<TakenDay> taken = takenDays(employee, dates.first(), dates.last()).stream()
+            List<TakenDay> taken = sameStoreDays(employee, dates.first(), dates.last()).stream()
                     .filter(t -> dates.contains(t.date()))
                     .toList();
             if (!taken.isEmpty()) {
@@ -159,6 +162,13 @@ public class DayOffService {
                 throw new BusinessRuleException(t.takenBy() + " already has " + dayName(t.date()) + " off at "
                         + employee.getHomeStore().getName() + ". Only one person per store can be off on a day. "
                         + "For something urgent, send an emergency request.");
+            }
+            // The whole area: never accept more days off than the stores can spare that day.
+            for (LocalDate date : dates) {
+                DayRoom room = scheduleService.dayRoom(employee, date, OPEN_STATUSES);
+                if (room.full()) {
+                    throw new BusinessRuleException(fullDayMessage(room));
+                }
             }
         }
 
@@ -191,14 +201,40 @@ public class DayOffService {
         return takenDays(employee, from, to);
     }
 
+    /** Days the employee can't ask for normally: same-store days first, then days the area has no one to spare. */
     private List<TakenDay> takenDays(Employee employee, LocalDate from, LocalDate to) {
+        if (to.isBefore(from) || from.plusDays(62).isBefore(to)) {
+            throw new BusinessRuleException("Pick a range of up to two months.");
+        }
+        List<TakenDay> result = new ArrayList<>(sameStoreDays(employee, from, to));
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+            LocalDate date = d;
+            if (result.stream().noneMatch(t -> t.date().equals(date))
+                    && scheduleService.dayRoom(employee, date, OPEN_STATUSES).full()) {
+                result.add(TakenDay.full(date));
+            }
+        }
+        result.sort(java.util.Comparator.comparing(TakenDay::date));
+        return result;
+    }
+
+    /** Days a colleague at the same home store is off. Floaters aren't tied to a store, so nobody blocks them. */
+    private List<TakenDay> sameStoreDays(Employee employee, LocalDate from, LocalDate to) {
         if (employee.getHomeStore() == null) {
-            return List.of(); // Floaters aren't tied to a store, so nobody blocks them.
+            return List.of();
         }
         return repository.findSameStore(employee.getHomeStore().getId(), employee.getId(), from, to, OPEN_STATUSES)
                 .stream()
                 .map(r -> new TakenDay(r.getOffDate(), r.getEmployee().getFirstName(), r.getStatus()))
                 .toList();
+    }
+
+    private static String fullDayMessage(DayRoom room) {
+        String who = room.offNames().isEmpty() ? ""
+                : " (" + String.join(", ", room.offNames()) + (room.offNames().size() == 1 ? " is" : " are") + " already off)";
+        return dayName(room.date()) + " is full: the stores need " + room.needed() + " people that day and only "
+                + Math.max(0, room.working()) + " others would be working" + who + ". Pick another day, or send an "
+                + "emergency request if it's urgent.";
     }
 
     private static String dayName(LocalDate date) {
@@ -213,6 +249,45 @@ public class DayOffService {
         // If that week's schedule was already made, the person must not stay scheduled to work that day.
         DayOffRequest r = get(id);
         return approved.withScheduleUpdate(scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate()));
+    }
+
+    /**
+     * Approves several pending requests in one go, earliest day first (emergencies first on the same day). Each one is
+     * checked against the schedule as it stands after the ones before it, so "only if covered" never approves two
+     * people off when the stores can spare one. Requests that can't be approved are left pending, with the reason.
+     */
+    @Transactional
+    public ApproveManyResult approveMany(List<Long> ids, boolean onlyIfCovered) {
+        List<DayOffRequest> requests = repository.findAllById(new java.util.LinkedHashSet<>(ids)).stream()
+                .sorted(java.util.Comparator.comparing(DayOffRequest::getOffDate)
+                        .thenComparing(r -> !r.isEmergency())
+                        .thenComparing(DayOffRequest::getId))
+                .toList();
+        CurrentUser user = accessPolicy.current();
+        List<DayOffResponse> approved = new ArrayList<>();
+        List<SkippedRequest> skipped = new ArrayList<>();
+        for (DayOffRequest r : requests) {
+            Employee e = r.getEmployee();
+            String why = null;
+            if (r.getStatus() != DayOffStatus.PENDING) {
+                why = "Already " + r.getStatus().name().toLowerCase() + ".";
+            } else if (e.getId().equals(user.id())) {
+                why = "Your own request: an admin decides on it.";
+            } else if (!user.isAdmin() && !java.util.Objects.equals(areaOf(e), user.areaId())) {
+                why = "Not in your area.";
+            } else if (onlyIfCovered) {
+                var impact = scheduleService.dayOffImpact(r.getId());
+                if (impact.level() == com.example.schedulingsoftware.schedule.ScheduleDtos.ImpactLevel.SHORT) {
+                    why = impact.summary();
+                }
+            }
+            if (why != null) {
+                skipped.add(new SkippedRequest(r.getId(), e.getFullName(), r.getOffDate(), why));
+            } else {
+                approved.add(approve(r.getId(), null));
+            }
+        }
+        return new ApproveManyResult(approved, skipped);
     }
 
     @Transactional

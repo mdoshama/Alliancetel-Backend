@@ -70,7 +70,14 @@ class ScheduleServiceIntegrationTest {
         assertEquals(1, schedule.pendingDayOffRequests());
         EmployeeRow anna = row(schedule, annaId);
         assertEquals(DayType.REQUESTED_OFF, anna.days().get(1).type());
-        schedule.rows().forEach(r -> assertEquals(6, r.scheduledWorkDays()));
+        // No automatic days off: only Anna's approved day is off; everyone else works all week.
+        assertEquals(6, anna.scheduledWorkDays());
+        assertEquals(7, row(schedule, benId).scheduledWorkDays());
+        // Ben's pending request is shown on his Thursday, and in the week's list, for the manager to decide.
+        assertEquals(1, schedule.requests().size());
+        assertEquals(benId, schedule.requests().getFirst().employeeId());
+        assertEquals(schedule.requests().getFirst().id(), row(schedule, benId).days().get(3).request().id());
+        assertEquals(DayType.WORK, row(schedule, benId).days().get(3).type());
 
         ScheduleResponse published = scheduleService.publish(schedule.id());
         assertEquals(ScheduleStatus.PUBLISHED, published.status());

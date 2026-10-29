@@ -70,7 +70,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/employees/**").hasRole(ADMIN)
 
                         // Everyone can request days off; only managers and admins decide on them.
-                        .requestMatchers("/api/day-off-requests/*/approve", "/api/day-off-requests/*/reject")
+                        .requestMatchers("/api/day-off-requests/*/approve", "/api/day-off-requests/*/reject",
+                                "/api/day-off-requests/approve-many")
                                 .hasAnyRole(ADMIN, MANAGER)
                         .requestMatchers("/api/day-off-requests/**").authenticated()
 

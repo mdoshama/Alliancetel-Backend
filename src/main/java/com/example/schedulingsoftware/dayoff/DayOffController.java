@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.schedulingsoftware.common.PageResponse;
+import com.example.schedulingsoftware.dayoff.DayOffDtos.ApproveManyRequest;
+import com.example.schedulingsoftware.dayoff.DayOffDtos.ApproveManyResult;
 
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
@@ -77,6 +79,12 @@ public class DayOffController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return dayOffService.takenDays(employeeId, from, to);
+    }
+
+    /** Approve many at once; with onlyIfCovered, requests that would leave a store short stay pending. */
+    @PostMapping("/approve-many")
+    public ApproveManyResult approveMany(@Valid @RequestBody ApproveManyRequest body) {
+        return dayOffService.approveMany(body.ids(), !Boolean.FALSE.equals(body.onlyIfCovered()));
     }
 
     @PostMapping("/{id}/approve")

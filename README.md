@@ -44,9 +44,15 @@ browser ──► frontend (nginx: Angular site, forwards /api) ──► backen
 
 ### Weekly schedules
 
-- **Generate** builds the Monday–Sunday week. Approved days off come first, then the remaining
-  regular days off are spread so each day has even coverage, never giving two people from the same store
-  the same day off when it can be avoided. Then everyone is placed at a store.
+- **Generate** builds the Monday–Sunday week with **everyone working every day their stores are open**.
+  Approved days off are the only days off; nobody gets an automatic day off. Then everyone is placed at a store.
+- **Day-off requests on the schedule**: pending requests are marked **Off?** on the person's day and listed in a
+  panel above the grid with a staffing check (Covered / No spare staff / Leaves a store short). Approve or reject
+  each one there or from the day itself, or **Approve all that fit**: requests are approved one at a time,
+  earliest day first (emergencies first on a day), and any that would leave a store below its minimum stay
+  pending for you to decide.
+- **No day off yet**: people working more days than usual (e.g. 7 of 6) are flagged in amber with a banner, so
+  you can approve their request or give them a day by hand (click a day → Off, or drag onto Off).
 - **When a store's primary is off**, that store's secondaries stay there to cover it instead of being sent
   elsewhere.
 - **Store assignment** keeps people at their home store, sends floaters (then secondaries) to stores
@@ -65,13 +71,19 @@ browser ──► frontend (nginx: Angular site, forwards /api) ──► backen
 - **One person off per store per day**: if a colleague at the same home store already has a day (pending or
   approved), it shows as *Taken* and a normal request is refused. This also keeps a store's primary and
   secondary from being off together. Floaters are never blocked.
-- **Emergency day off**: for urgent cases. It skips the one-per-store rule and the weekly limit, is
-  flagged in red, and still needs a manager's approval.
+- **Never short-staffed by requests**: a normal request is refused when the day is **Full**, meaning the
+  area's other staff who would still be working are fewer than its open stores' minimums added up. Once the week's
+  schedule exists it counts who is actually off that day (including days given by hand); before that it counts the
+  pending and approved requests. Full days are marked in the request form, and the message names who is off.
+- **Emergency day off**: for urgent cases. It skips the one-per-store rule, the Full-day rule and the weekly
+  limit, is flagged in red, and still needs a manager's approval.
 - Before approving, managers see a **staffing check**: how many people would still be working, who
   else is off that day, and whether any store would drop below its minimum (Covered / No spare
   staff / Leaves a store short).
-- Approving updates that week's schedule straight away if it already exists. The approved day
-  replaces the person's regular day off, so they keep their usual number of work days.
+- Approving updates that week's schedule straight away if it already exists, published or draft: that day
+  becomes **Off ✓** (an approved day off) and the stores are refilled. No other day changes. Approved days off
+  are locked: they can't be turned into work or edited by hand, and opening or publishing a week re-checks that
+  every approved day is off.
 
 ---
 
@@ -169,7 +181,7 @@ All endpoints are under `/api` and need a sign-in token (`Authorization: Bearer 
 | Areas | `GET/POST /areas`, `GET/PUT/DELETE /areas/{id}` |
 | Stores | `GET/POST /stores`, `PUT/DELETE /stores/{id}` (hours, color, minimum) |
 | Employees | `GET /employees/page?page&size&sort&areaId&storeId&role&storeRole&active&q` (paged), `GET/POST /employees`, `GET/PUT/DELETE /employees/{id}`, `PATCH /employees/{id}/home-store` (store and primary/secondary), `POST /employees/{id}/reset-password` |
-| Days off | `GET /day-off-requests/page?page&size&status&areaId&from&to&q` (paged), `GET/POST /day-off-requests`, `GET /day-off-requests/taken-days?employeeId&from&to`, `GET /day-off-requests/{id}/impact`, `POST /day-off-requests/{id}/approve`, `POST /day-off-requests/{id}/reject`, `DELETE /day-off-requests/{id}` |
+| Days off | `POST /day-off-requests/approve-many` (`{ids, onlyIfCovered}`), `GET /day-off-requests/page?page&size&status&areaId&from&to&q` (paged), `GET/POST /day-off-requests`, `GET /day-off-requests/taken-days?employeeId&from&to`, `GET /day-off-requests/{id}/impact`, `POST /day-off-requests/{id}/approve`, `POST /day-off-requests/{id}/reject`, `DELETE /day-off-requests/{id}` |
 | Schedules | `GET /schedules?areaId&weekStart`, `POST /schedules/generate`, `PATCH /schedules/{id}/entries/{entryId}`, `POST /schedules/{id}/swap`, `POST /schedules/{id}/swap-days`, `POST /schedules/{id}/exchange` (drag and drop), `POST /schedules/{id}/auto-assign-stores`, `POST /schedules/{id}/move-for-week`, `POST /schedules/{id}/publish`, `POST /schedules/{id}/revert-to-draft` |
 
 Paged endpoints return `{ content, page, size, totalElements, totalPages }`. Pages start at 0, `size` is

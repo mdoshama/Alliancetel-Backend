@@ -190,7 +190,7 @@ class StoreRotationIntegrationTest {
         assertEquals(2, s.stores().size());
         int oceansideShifts = s.storeCoverage().stream().filter(c -> oceanside.equals(c.storeId()))
                 .findFirst().orElseThrow().dailyHeadCount().stream().mapToInt(Integer::intValue).sum();
-        assertEquals(12, oceansideShifts, "Ana and the manager each work 6 days at Oceanside");
+        assertEquals(14, oceansideShifts, "Ana and the manager each work all 7 days at Oceanside (no automatic days off)");
     }
 
     @Test
@@ -209,7 +209,7 @@ class StoreRotationIntegrationTest {
 
     @Test
     void swapWithSomeoneOffHandsOverTheShift() {
-        ScheduleResponse s = scheduleService.generate(area, monday);
+        ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ana, 2);
         DayCell anaOff = row(s, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         int day = row(s, ana).days().indexOf(anaOff);
         DayCell benSameDay = row(s, ben).days().get(day);
@@ -248,7 +248,7 @@ class StoreRotationIntegrationTest {
 
     @Test
     void changingADayToWorkDefaultsToHomeStoreAndOffClearsStore() {
-        ScheduleResponse s = scheduleService.generate(area, monday);
+        ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ana, 1);
         DayCell off = row(s, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         ScheduleResponse worked = scheduleService.updateEntry(s.id(), off.entryId(), DayType.WORK, null);
         assertEquals(oceanside, cell(worked, ana, off.entryId()).storeId());
@@ -286,26 +286,18 @@ class StoreRotationIntegrationTest {
         storeService.update(oceanside, new StoreRequest(area, "Oceanside", "OCN", null, 0, true, null, null));
         storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 3, true, null, null));
 
-        ScheduleResponse s = scheduleService.generate(area, monday);
-        List<DayCell> anaDays = row(s, ana).days();
+        // Ana gets Wednesday off; Auto-fill then keeps Carl at Oceanside that day.
+        ScheduleResponse s = scheduleService.autoAssignStores(dayOff(scheduleService.generate(area, monday), ana, 2).id());
         List<DayCell> carlDays = row(s, carl).days();
-        boolean checkedOne = false;
-        for (int i = 0; i < 7; i++) {
-            assertTrue(anaDays.get(i).type() == DayType.WORK || carlDays.get(i).type() == DayType.WORK,
-                    "Ana and Carl are never both off (" + anaDays.get(i).date() + ")");
-            if (anaDays.get(i).type() != DayType.WORK && carlDays.get(i).type() == DayType.WORK) {
-                assertEquals(oceanside, carlDays.get(i).storeId(), "Carl covers Oceanside on Ana's day off");
-                checkedOne = true;
-            }
-        }
-        assertTrue(checkedOne);
+        assertEquals(DayType.OFF, row(s, ana).days().get(2).type());
+        assertEquals(oceanside, carlDays.get(2).storeId(), "Carl covers Oceanside on Ana's day off");
         // Sanity: on other days Carl is lent to Chula Vista at least once (so the rule above really mattered).
         assertTrue(carlDays.stream().anyMatch(c -> chulaVista.equals(c.storeId())));
     }
 
     @Test
     void aDayOffCanBeMovedToAnotherDayOfTheWeek() {
-        ScheduleResponse s = scheduleService.generate(area, monday);
+        ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ana, 2);
         List<DayCell> days = row(s, ana).days();
         DayCell off = days.stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         DayCell work = days.stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
@@ -327,7 +319,7 @@ class StoreRotationIntegrationTest {
 
     @Test
     void anyTwoDaysCanTradePlaces() {
-        ScheduleResponse s = scheduleService.generate(area, monday);
+        ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ben, 3);
         // Ana's first work day and Ben's day off on a different date.
         DayCell benOff = row(s, ben).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         DayCell anaWork = row(s, ana).days().stream()
@@ -417,7 +409,7 @@ class StoreRotationIntegrationTest {
     @Test
     void aWorkDayNeedsAStore() {
         employeeService.changeHomeStore(ana, null);
-        ScheduleResponse s = scheduleService.generate(area, monday);
+        ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ana, 0);
         DayCell off = row(s, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         // No home store to fall back on, so the store must be given.
         BusinessRuleException e = assertThrows(BusinessRuleException.class,
@@ -505,6 +497,11 @@ class StoreRotationIntegrationTest {
     private Long employee(String code, Role role, Long storeId, Long areaId) {
         return employeeService.create(new EmployeeRequest(code, "Test", code, code.toLowerCase() + "@test.example",
                 null, role, areaId, storeId, 6, true, null)).employee().id();
+    }
+
+    /** Schedules start with everyone working; a manager gives days off on the schedule. */
+    private ScheduleResponse dayOff(ScheduleResponse s, Long employeeId, int day) {
+        return scheduleService.updateEntry(s.id(), row(s, employeeId).days().get(day).entryId(), DayType.OFF, null);
     }
 
     private static EmployeeRow row(ScheduleResponse s, Long employeeId) {
