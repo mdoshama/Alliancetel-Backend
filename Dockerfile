@@ -1,12 +1,13 @@
 # AllianceTel scheduling API: build with Maven, run on a slim Java runtime as a non-root user.
-# syntax=docker/dockerfile:1
 
 FROM maven:3.10-eclipse-temurin-25-noble AS build
 WORKDIR /app
+# Download the libraries in their own layer first: Docker (and Railway) reuse it until pom.xml changes,
+# so later builds only recompile the code. (No cache mounts: Railway rejects them without its own ids.)
 COPY pom.xml .
+RUN mvn -B -q dependency:go-offline
 COPY src ./src
-# The cache mount keeps downloaded libraries between builds (requires BuildKit, the default in current Docker).
-RUN --mount=type=cache,target=/root/.m2 mvn -B -q -DskipTests package
+RUN mvn -B -q -DskipTests package
 
 FROM eclipse-temurin:25-jre
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
