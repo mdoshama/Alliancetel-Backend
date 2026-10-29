@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.schedulingsoftware.common.PageResponse;
 import com.example.schedulingsoftware.employee.EmployeeDtos.CredentialsResponse;
 import com.example.schedulingsoftware.employee.EmployeeDtos.EmployeeRequest;
 import com.example.schedulingsoftware.employee.EmployeeDtos.HomeStoreRequest;
@@ -37,6 +38,21 @@ public class EmployeeController {
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false, name = "q") String query) {
         return employeeService.search(areaId, role, active, query);
+    }
+
+    /** One page of the staff list: filters, search ("q": name, email or code), page from 0, size up to 100. */
+    @GetMapping("/page")
+    public PageResponse<EmployeeResponse> page(
+            @RequestParam(required = false) Long areaId,
+            @RequestParam(required = false) Role role,
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(required = false) Long storeId,
+            @RequestParam(required = false) StoreRole storeRole,
+            @RequestParam(required = false, name = "q") String query,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sort) {
+        return employeeService.page(areaId, role, active, storeId, storeRole, query, page, size, sort);
     }
 
     @GetMapping("/{id}")

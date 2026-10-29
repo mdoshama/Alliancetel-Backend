@@ -152,7 +152,7 @@ never seeds demo data and never shows error details to the browser.
   floaters and closed days (`StoreAssignerTest`), approved days off (`DayOffPlannerTest`),
   sign-in lockout (`LoginAttemptServiceTest`).
 - Integration tests on an in-memory database: access rules per role, stores and hours, colors,
-  store roles, minimum staffing, day-off approval and the staffing check.
+  store roles, minimum staffing, day-off approval and the staffing check, paging and search.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the tests and a Docker build on every push.
 
@@ -168,9 +168,13 @@ All endpoints are under `/api` and need a sign-in token (`Authorization: Bearer 
 | Sign-in | `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password` |
 | Areas | `GET/POST /areas`, `GET/PUT/DELETE /areas/{id}` |
 | Stores | `GET/POST /stores`, `PUT/DELETE /stores/{id}` (hours, color, minimum) |
-| Employees | `GET/POST /employees`, `GET/PUT/DELETE /employees/{id}`, `PATCH /employees/{id}/home-store` (store and primary/secondary), `POST /employees/{id}/reset-password` |
-| Days off | `GET/POST /day-off-requests`, `GET /day-off-requests/taken-days?employeeId&from&to`, `GET /day-off-requests/{id}/impact`, `POST /day-off-requests/{id}/approve`, `POST /day-off-requests/{id}/reject`, `DELETE /day-off-requests/{id}` |
+| Employees | `GET /employees/page?page&size&sort&areaId&storeId&role&storeRole&active&q` (paged), `GET/POST /employees`, `GET/PUT/DELETE /employees/{id}`, `PATCH /employees/{id}/home-store` (store and primary/secondary), `POST /employees/{id}/reset-password` |
+| Days off | `GET /day-off-requests/page?page&size&status&areaId&from&to&q` (paged), `GET/POST /day-off-requests`, `GET /day-off-requests/taken-days?employeeId&from&to`, `GET /day-off-requests/{id}/impact`, `POST /day-off-requests/{id}/approve`, `POST /day-off-requests/{id}/reject`, `DELETE /day-off-requests/{id}` |
 | Schedules | `GET /schedules?areaId&weekStart`, `POST /schedules/generate`, `PATCH /schedules/{id}/entries/{entryId}`, `POST /schedules/{id}/swap`, `POST /schedules/{id}/swap-days`, `POST /schedules/{id}/exchange` (drag and drop), `POST /schedules/{id}/auto-assign-stores`, `POST /schedules/{id}/move-for-week`, `POST /schedules/{id}/publish`, `POST /schedules/{id}/revert-to-draft` |
+
+Paged endpoints return `{ content, page, size, totalElements, totalPages }`. Pages start at 0, `size` is
+1–100 (default 25), `q` is a case-insensitive search (`%` and `_` match themselves). The plain list
+endpoints stay for pickers.
 
 Errors come back as JSON (`application/problem+json`) with a plain-language `detail` message.
 
@@ -187,7 +191,7 @@ src/main/java/com/example/schedulingsoftware/
 ├── schedule/    weekly schedules, generator, store assigner, day-off planner, staffing check
 ├── auth/        sign-in (JWT), access rules, password policy, lockout
 ├── config/      first admin and demo data
-└── common/      error handling
+└── common/      error handling, page responses
 ```
 
 The database tables are created and extended automatically on start-up (`ddl-auto: update`).

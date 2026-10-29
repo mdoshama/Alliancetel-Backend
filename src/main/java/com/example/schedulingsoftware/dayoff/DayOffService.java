@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
 
@@ -22,6 +23,7 @@ import org.springframework.security.access.AccessDeniedException;
 import com.example.schedulingsoftware.auth.AccessPolicy;
 import com.example.schedulingsoftware.auth.CurrentUser;
 import com.example.schedulingsoftware.common.BusinessRuleException;
+import com.example.schedulingsoftware.common.PageResponse;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
@@ -58,11 +60,28 @@ public class DayOffService {
     @Transactional(readOnly = true)
     public List<DayOffResponse> search(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to) {
+        return repository.findAll(filter(requestedAreaId, requestedEmployeeId, status, from, to, null),
+                Sort.by("offDate", "id")).stream()
+                .map(DayOffResponse::from)
+                .toList();
+    }
+
+    /** One page of requests, oldest day first; "q" matches the employee's name or code. */
+    @Transactional(readOnly = true)
+    public PageResponse<DayOffResponse> page(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
+            LocalDate from, LocalDate to, String query, Integer page, Integer size) {
+        var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query);
+        return PageResponse.from(repository.findAll(spec, PageResponse.request(page, size, Sort.by("offDate", "id"))),
+                DayOffResponse::from);
+    }
+
+    private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
+            LocalDate from, LocalDate to, String query) {
         CurrentUser user = accessPolicy.current();
         Long areaId = accessPolicy.restrictToArea(requestedAreaId);
         // Employees only ever see their own requests.
         Long employeeId = user.isEmployee() ? user.id() : requestedEmployeeId;
-        Specification<DayOffRequest> spec = (root, cq, cb) -> {
+        return (root, cq, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (areaId != null) {
                 predicates.add(cb.equal(root.get("employee").get("area").get("id"), areaId));
@@ -79,11 +98,18 @@ public class DayOffService {
             if (to != null) {
                 predicates.add(cb.lessThanOrEqualTo(root.get("offDate"), to));
             }
+            if (query != null && !query.isBlank()) {
+                String like = "%" + EmployeeService.escapeLike(query.trim().toLowerCase(Locale.ROOT)) + "%";
+                var employee = root.get("employee");
+                predicates.add(cb.or(
+                        cb.like(cb.lower(employee.get("firstName")), like, '\\'),
+                        cb.like(cb.lower(employee.get("lastName")), like, '\\'),
+                        cb.like(cb.lower(cb.concat(cb.concat(employee.get("firstName"), " "), employee.get("lastName"))),
+                                like, '\\'),
+                        cb.like(cb.lower(employee.get("employeeCode")), like, '\\')));
+            }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
-        return repository.findAll(spec, Sort.by("offDate", "id")).stream()
-                .map(DayOffResponse::from)
-                .toList();
     }
 
     @Transactional

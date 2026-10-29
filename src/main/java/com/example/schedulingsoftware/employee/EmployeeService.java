@@ -15,6 +15,7 @@ import com.example.schedulingsoftware.area.AreaService;
 import com.example.schedulingsoftware.auth.AccessPolicy;
 import com.example.schedulingsoftware.auth.PasswordPolicy;
 import com.example.schedulingsoftware.common.BusinessRuleException;
+import com.example.schedulingsoftware.common.PageResponse;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.employee.EmployeeDtos.CredentialsResponse;
 import com.example.schedulingsoftware.employee.EmployeeDtos.EmployeeRequest;
@@ -37,7 +38,40 @@ public class EmployeeService {
     @Transactional(readOnly = true)
     public List<EmployeeResponse> search(Long requestedAreaId, Role role, Boolean active, String query) {
         Long areaId = accessPolicy.restrictToArea(requestedAreaId);
-        Specification<Employee> spec = (root, cq, cb) -> {
+        return employeeRepository.findAll(filter(areaId, role, active, null, null, query), sortBy(null)).stream()
+                .map(EmployeeResponse::from)
+                .toList();
+    }
+
+    /**
+     * One page of employees, for the staff list. Same filters as {@link #search} plus home store and
+     * primary / secondary / floater; managers only ever see their own area.
+     *
+     * @param sort "name" (default), "code" or "role"
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<EmployeeResponse> page(Long requestedAreaId, Role role, Boolean active, Long storeId,
+            StoreRole storeRole, String query, Integer page, Integer size, String sort) {
+        Long areaId = accessPolicy.restrictToArea(requestedAreaId);
+        Specification<Employee> spec = filter(areaId, role, active, storeId, storeRole, query);
+        return PageResponse.from(employeeRepository.findAll(spec, PageResponse.request(page, size, sortBy(sort))),
+                EmployeeResponse::from);
+    }
+
+    private static Sort sortBy(String sort) {
+        Sort byName = Sort.by("lastName", "firstName", "id");
+        if ("code".equalsIgnoreCase(sort)) {
+            return Sort.by("employeeCode", "id");
+        }
+        if ("role".equalsIgnoreCase(sort)) {
+            return Sort.by("role").and(byName);
+        }
+        return byName;
+    }
+
+    private static Specification<Employee> filter(Long areaId, Role role, Boolean active, Long storeId,
+            StoreRole storeRole, String query) {
+        return (root, cq, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (areaId != null) {
                 predicates.add(cb.equal(root.get("area").get("id"), areaId));
@@ -48,19 +82,35 @@ public class EmployeeService {
             if (active != null) {
                 predicates.add(cb.equal(root.get("active"), active));
             }
+            if (storeId != null) {
+                predicates.add(cb.equal(root.get("homeStore").get("id"), storeId));
+            }
+            if (storeRole != null) {
+                switch (storeRole) {
+                    case FLOATER -> predicates.add(cb.isNull(root.get("homeStore")));
+                    case PRIMARY -> predicates.add(cb.and(cb.isNotNull(root.get("homeStore")),
+                            cb.isTrue(root.get("primaryAtStore"))));
+                    case SECONDARY -> predicates.add(cb.and(cb.isNotNull(root.get("homeStore")),
+                            cb.isFalse(root.get("primaryAtStore"))));
+                }
+            }
             if (query != null && !query.isBlank()) {
-                String like = "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
+                String like = "%" + escapeLike(query.trim().toLowerCase(Locale.ROOT)) + "%";
+                // "ana lopez" also matches first + last name together.
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("firstName")), like),
-                        cb.like(cb.lower(root.get("lastName")), like),
-                        cb.like(cb.lower(root.get("email")), like),
-                        cb.like(cb.lower(root.get("employeeCode")), like)));
+                        cb.like(cb.lower(root.get("firstName")), like, '\\'),
+                        cb.like(cb.lower(root.get("lastName")), like, '\\'),
+                        cb.like(cb.lower(cb.concat(cb.concat(root.get("firstName"), " "), root.get("lastName"))), like, '\\'),
+                        cb.like(cb.lower(root.get("email")), like, '\\'),
+                        cb.like(cb.lower(root.get("employeeCode")), like, '\\')));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
-        return employeeRepository.findAll(spec, Sort.by("lastName", "firstName")).stream()
-                .map(EmployeeResponse::from)
-                .toList();
+    }
+
+    /** Makes % and _ in a search match themselves. */
+    public static String escapeLike(String text) {
+        return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     @Transactional(readOnly = true)

@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.schedulingsoftware.common.PageResponse;
+
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.ReviewDayOffRequest;
@@ -47,6 +49,20 @@ public class DayOffController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return dayOffService.search(areaId, employeeId, status, from, to);
+    }
+
+    /** One page of requests; "q" searches the employee's name or code. */
+    @GetMapping("/page")
+    public PageResponse<DayOffResponse> page(
+            @RequestParam(required = false) Long areaId,
+            @RequestParam(required = false) Long employeeId,
+            @RequestParam(required = false) DayOffStatus status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false, name = "q") String query,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        return dayOffService.page(areaId, employeeId, status, from, to, query, page, size);
     }
 
     @PostMapping
