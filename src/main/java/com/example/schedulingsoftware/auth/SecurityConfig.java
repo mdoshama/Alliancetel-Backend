@@ -39,6 +39,7 @@ public class SecurityConfig {
 
     private final JwtService jwtService;
     private final EmployeeRepository employeeRepository;
+    private final RevokedTokenRepository revokedTokenRepository;
 
     @Value("${alliancetel.security.cors-allowed-origins:}")
     private String corsAllowedOrigins;
@@ -86,7 +87,7 @@ public class SecurityConfig {
                                 writeProblem(res, HttpStatus.UNAUTHORIZED, "Please sign in."))
                         .accessDeniedHandler((req, res, e) ->
                                 writeProblem(res, HttpStatus.FORBIDDEN, "You don't have permission to do that.")))
-                .addFilterBefore(new JwtAuthenticationFilter(jwtService, employeeRepository),
+                .addFilterBefore(new JwtAuthenticationFilter(jwtService, employeeRepository, revokedTokenRepository),
                         UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new PasswordChangeRequiredFilter(), JwtAuthenticationFilter.class);
         return http.build();
@@ -121,9 +122,13 @@ public class SecurityConfig {
         };
     }
 
+    /**
+     * BCrypt with cost 12 by default (about a quarter second per check on a small server), which makes offline
+     * guessing from a leaked database far slower. Older, cheaper hashes are upgraded at the next sign-in.
+     */
     @Bean
-    PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+    PasswordEncoder passwordEncoder(@Value("${alliancetel.security.bcrypt-strength:12}") int strength) {
+        return new BCryptPasswordEncoder(strength);
     }
 
     static void writeProblem(HttpServletResponse res, HttpStatus status, String detail) throws IOException {

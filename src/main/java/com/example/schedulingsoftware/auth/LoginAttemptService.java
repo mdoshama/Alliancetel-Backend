@@ -13,11 +13,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Slows down password guessing: after too many failed sign-ins for one email (or from one IP address) within the
  * lock window, further attempts are refused until the window passes. A successful sign-in clears the email's count.
  * Kept in memory, which is fine for a single backend instance.
  */
+@Slf4j
 @Service
 public class LoginAttemptService {
 
@@ -25,6 +28,8 @@ public class LoginAttemptService {
     private final int maxPerIp;
     private final Duration window;
     private final Clock clock;
+    private static final int CLEANUP_THRESHOLD = 10_000;
+
     private final Map<String, Deque<Instant>> failures = new ConcurrentHashMap<>();
 
     @Autowired
@@ -50,8 +55,38 @@ public class LoginAttemptService {
 
     public void recordFailure(String email, String ip) {
         Instant now = clock.instant();
-        failures.computeIfAbsent(emailKey(email), k -> new ArrayDeque<>()).addLast(now);
-        failures.computeIfAbsent(ipKey(ip), k -> new ArrayDeque<>()).addLast(now);
+        add(emailKey(email), now);
+        add(ipKey(ip), now);
+        if (recent(emailKey(email)) == maxPerEmail) {
+            log.warn("Sign-in locked for {} minutes after {} failed attempts: {} (last from {})",
+                    window.toMinutes(), maxPerEmail, email == null ? "" : email.trim(), ip);
+        }
+        if (recent(ipKey(ip)) == maxPerIp) {
+            log.warn("Sign-in locked for {} minutes for address {} after {} failed attempts",
+                    window.toMinutes(), ip, maxPerIp);
+        }
+        if (failures.size() > CLEANUP_THRESHOLD) {
+            forgetOldFailures();
+        }
+    }
+
+    private void add(String key, Instant when) {
+        Deque<Instant> attempts = failures.computeIfAbsent(key, k -> new ArrayDeque<>());
+        synchronized (attempts) {
+            attempts.addLast(when);
+        }
+    }
+
+    /**
+     * Drops entries whose failures are all older than the window, so guessing with many made-up emails can't
+     * fill the server's memory.
+     */
+    void forgetOldFailures() {
+        failures.keySet().removeIf(key -> recent(key) == 0);
+    }
+
+    int trackedKeys() {
+        return failures.size();
     }
 
     public void recordSuccess(String email) {

@@ -73,7 +73,7 @@ git push -u origin main
    ```
 
    - `JWT_SECRET`: run `openssl rand -base64 48` on your Mac and paste the result.
-   - `ADMIN_EMAIL` / `ADMIN_PASSWORD`: the first administrator (8+ characters with a letter and a number).
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD`: the first administrator (8+ characters with a letter and a number; you'll choose a stronger one at first sign-in).
      They must choose a new password after the first sign-in.
    - The `${{Postgres...}}` values are Railway references; Railway fills them in from the database service.
 3. Don't generate a public domain for the backend. It only needs to be reachable from the frontend.
@@ -349,7 +349,8 @@ across too, so deactivate them or reset their passwords.
   or, on an empty database, without a valid `ADMIN_PASSWORD`. The log says exactly what is missing.
 - **No demo data** is created.
 - **Sign-in protection:** after 5 wrong passwords for one email (or 20 from one address) sign-in is paused for
-  15 minutes (`MAX_FAILED_LOGINS`, `LOGIN_LOCK_MINUTES` to adjust).
+  15 minutes (`MAX_FAILED_LOGINS`, `LOGIN_LOCK_MINUTES` to adjust). Strong-password rules, sign out on every
+  device, and temporary passwords that expire after 7 days: see README, "Sign-in and security".
 - **Errors** never reveal internal details to the browser; full details go to the backend log.
 - **Health checks:** `GET /actuator/health` (API) and `GET /healthz` (site) for load balancers and monitoring.
 
@@ -368,5 +369,8 @@ updating.** If the schema needs a rename or a data change in future, add a migra
 | Site shows but sign-in says "Cannot reach the server" | `docker compose logs backend`; the backend may still be starting (≈30–60 s). |
 | Backend exits right away | `docker compose logs backend`: look for the line naming the missing setting. |
 | Everyone was signed out | `JWT_SECRET` changed, or tokens expired (12 h by default, `TOKEN_HOURS`). |
+| Someone was signed out on their phone | They used *Sign out everywhere*, or their password was changed or reset. Signing in again fixes it. |
+| "Your temporary password has expired" | It's older than 7 days. An admin resets it on the Employees page (`TEMP_PASSWORD_HOURS` to change). |
+| Suspicious sign-in attempts | Backend **Deploy Logs**: search for `Failed sign-in` and `Sign-in locked`. |
 | Locked out of the only admin account | Wait 15 minutes; or reset via the database: set `password_hash = NULL` for that admin, set `ADMIN_EMAIL`/`ADMIN_PASSWORD` and restart. The admin is re-created with that password. |
 | Dates look a day off | Check `TZ` in `.env`. |

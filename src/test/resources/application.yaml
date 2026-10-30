@@ -9,6 +9,9 @@ spring:
       ddl-auto: create-drop
 
 alliancetel:
+  security:
+    # Fast hashing keeps the test suite quick; production uses 12.
+    bcrypt-strength: 4
   scheduling:
     max-day-off-requests-per-week: 2
   demo-data:

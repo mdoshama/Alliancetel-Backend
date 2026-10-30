@@ -26,7 +26,9 @@ import com.example.schedulingsoftware.store.StoreService;
 
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class EmployeeService {
@@ -141,8 +143,7 @@ public class EmployeeService {
         Employee employee = new Employee();
         apply(employee, request, code, email);
         String temporary = PasswordPolicy.generateTemporary();
-        employee.setPasswordHash(passwordEncoder.encode(temporary));
-        employee.setMustChangePassword(true);
+        employee.setPassword(passwordEncoder.encode(temporary), true);
         return new CredentialsResponse(EmployeeResponse.from(employeeRepository.save(employee)), temporary);
     }
 
@@ -167,7 +168,10 @@ public class EmployeeService {
         if (id.equals(accessPolicy.current().id())) {
             throw new BusinessRuleException("You cannot deactivate your own account.");
         }
-        getEmployee(id).setActive(false);
+        Employee employee = getEmployee(id);
+        employee.setActive(false);
+        employee.endAllSessions();
+        log.info("Deactivated {} (by {})", employee.getEmail(), accessPolicy.current().email());
     }
 
     /**
@@ -203,8 +207,9 @@ public class EmployeeService {
             throw new BusinessRuleException(employee.getFullName() + " is inactive. Reactivate them first.");
         }
         String temporary = PasswordPolicy.generateTemporary();
-        employee.setPasswordHash(passwordEncoder.encode(temporary));
-        employee.setMustChangePassword(true);
+        // Also signs them out everywhere, in case the reset is because someone else knew the old password.
+        employee.setPassword(passwordEncoder.encode(temporary), true);
+        log.info("Password reset for {} (by {})", employee.getEmail(), accessPolicy.current().email());
         return new CredentialsResponse(EmployeeResponse.from(employee), temporary);
     }
 
@@ -220,6 +225,10 @@ public class EmployeeService {
                 && (request.role() != Role.ADMIN || Boolean.FALSE.equals(request.active()))) {
             throw new BusinessRuleException("You cannot remove your own admin access.");
         }
+        // A change of role, email or access ends their current sessions, so it takes effect everywhere at once.
+        boolean endSessions = employee.getId() != null && (employee.getRole() != request.role()
+                || !email.equalsIgnoreCase(employee.getEmail())
+                || (Boolean.FALSE.equals(request.active()) && employee.isActive()));
         employee.setEmployeeCode(code);
         employee.setFirstName(InputRules.clean(request.firstName()));
         employee.setLastName(InputRules.clean(request.lastName()));
@@ -250,6 +259,9 @@ public class EmployeeService {
         }
         if (request.active() != null) {
             employee.setActive(request.active());
+        }
+        if (endSessions) {
+            employee.endAllSessions();
         }
     }
 }

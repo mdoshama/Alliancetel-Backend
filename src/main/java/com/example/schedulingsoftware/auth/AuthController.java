@@ -1,10 +1,12 @@
 package com.example.schedulingsoftware.auth;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.schedulingsoftware.auth.AuthDtos.ChangePasswordRequest;
@@ -46,9 +48,23 @@ public class AuthController {
         return authService.setEmailUpdates(body.optIn());
     }
 
-    /** Returns a fresh token, since the old one belonged to a session with a temporary password. */
+    /** Returns a fresh token; every other session (other browsers, phones) is signed out. */
     @PostMapping("/change-password")
-    public LoginResponse changePassword(@Valid @RequestBody ChangePasswordRequest request) {
-        return authService.changePassword(request.currentPassword(), request.newPassword());
+    public LoginResponse changePassword(@Valid @RequestBody ChangePasswordRequest request, HttpServletRequest http) {
+        return authService.changePassword(request.currentPassword(), request.newPassword(), http.getRemoteAddr());
+    }
+
+    /** Signs out this device: the token used for this call stops working. */
+    @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logout() {
+        authService.logout();
+    }
+
+    /** Signs the person out on every device, e.g. after losing a phone. */
+    @PostMapping("/logout-everywhere")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logoutEverywhere() {
+        authService.logoutEverywhere();
     }
 }

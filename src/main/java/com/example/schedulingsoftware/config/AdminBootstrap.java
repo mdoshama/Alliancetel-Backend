@@ -48,7 +48,7 @@ public class AdminBootstrap implements ApplicationRunner {
                     + "for the first start; the admin must change the password after signing in.");
         }
         try {
-            PasswordPolicy.validate(password);
+            PasswordPolicy.validateBootstrap(password);
         } catch (RuntimeException e) {
             throw new IllegalStateException("ADMIN_PASSWORD is too weak: " + e.getMessage(), e);
         }
@@ -65,8 +65,7 @@ public class AdminBootstrap implements ApplicationRunner {
                 });
         admin.setRole(Role.ADMIN);
         admin.setActive(true);
-        admin.setPasswordHash(passwordEncoder.encode(password));
-        admin.setMustChangePassword(true);
+        admin.setPassword(passwordEncoder.encode(password), true);
         employeeRepository.save(admin);
         log.warn("No admin could sign in. Bootstrap admin is {} with the configured initial password; "
                 + "it must be changed at first login.", admin.getEmail());

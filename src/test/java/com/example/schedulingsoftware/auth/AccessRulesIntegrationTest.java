@@ -127,7 +127,7 @@ class AccessRulesIntegrationTest {
     void weakPasswordsAreRejected() {
         assertThrows(BusinessRuleException.class, () -> PasswordPolicy.validate("short1"));
         assertThrows(BusinessRuleException.class, () -> PasswordPolicy.validate("allletters"));
-        PasswordPolicy.validate("Welcome123");
+        PasswordPolicy.validate("Blue-Harbor-47");
         String generated = PasswordPolicy.generateTemporary();
         PasswordPolicy.validate(generated);
     }

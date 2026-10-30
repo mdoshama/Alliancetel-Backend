@@ -98,12 +98,36 @@ public class Employee {
 
     private Instant lastLoginAt;
 
+    /** When the current password (or temporary password) was set. Temporary passwords stop working after a while. */
+    private Instant passwordSetAt;
+
+    /**
+     * Every sign-in token carries this number. Raising it ends all of this person's sessions at once: on "sign out
+     * everywhere", password change or reset, deactivation and role or email changes.
+     */
+    @Column(nullable = false)
+    @ColumnDefault("0")
+    private int tokenVersion;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();
+    }
+
+    /** Signs this person out everywhere: tokens issued before this call stop working. */
+    public void endAllSessions() {
+        tokenVersion++;
+    }
+
+    /** Stores a new password hash; temporary ones must be changed at the next sign-in. Ends existing sessions. */
+    public void setPassword(String hash, boolean temporary) {
+        this.passwordHash = hash;
+        this.mustChangePassword = temporary;
+        this.passwordSetAt = Instant.now();
+        endAllSessions();
     }
 
     public String getFullName() {

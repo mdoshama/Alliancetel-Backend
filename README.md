@@ -108,6 +108,24 @@ Employees hear about their schedule by **email** (on by default) and, once it's 
 - Until email is connected, emails are only recorded there (status *Not sent*). How to connect email and
   WhatsApp: [DEPLOYMENT.md](DEPLOYMENT.md#email-messages).
 
+### Sign-in and security
+
+- **Passwords** people choose must be at least 10 characters with a letter and a number, and can't be a common
+  word with digits added ("Welcome2026!", "P@ssw0rd1"), a keyboard or alphabet run ("qwerty1234"), the company name,
+  or contain the person's own name or email. The change-password page checks as you type.
+- **Temporary passwords** (new staff, resets) are 12 random characters, must be changed at first sign-in, and stop
+  working after 7 days (`TEMP_PASSWORD_HOURS`).
+- **Sessions** last 12 hours. *Sign out* ends that device's session on the server too, so a copied token stops
+  working. *Sign out everywhere* (account menu) ends every session, e.g. after losing a phone. Changing or resetting a
+  password, deactivating someone or changing their role or email also signs them out everywhere at once.
+- **Guessing** is slowed down: 5 wrong passwords for one email (or 20 from one address) pause sign-in for 15 minutes.
+  Wrong current passwords on the change-password page count too. Unknown emails and wrong passwords get the same
+  answer in the same time, so the form doesn't reveal who has an account.
+- **Storage:** passwords are kept only as BCrypt hashes (cost 12; older hashes are upgraded at the next sign-in).
+- **Browser:** the site sends a strict Content-Security-Policy (only its own scripts may run), HSTS, and
+  anti-framing headers (`nginx/security-headers.conf` in the frontend).
+- **Logs:** sign-ins, failures, lockouts, password changes and resets are logged with the address they came from.
+
 ### Input checks
 
 Every form and API request checks its values, with the same rules in the browser and on the server:
@@ -173,6 +191,8 @@ Every setting can be given as an environment variable.
 | `TOKEN_HOURS` | `12` | How long a sign-in lasts. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | demo values | First administrator, created only if no admin can sign in. Must change the password at first sign-in. |
 | `MAX_FAILED_LOGINS` / `LOGIN_LOCK_MINUTES` | `5` / `15` | Sign-in lockout after repeated wrong passwords. |
+| `TEMP_PASSWORD_HOURS` | `168` (7 days) | How long a temporary password works before an admin must reset it again. |
+| `BCRYPT_STRENGTH` | `12` | Password hashing cost; each step doubles the work. |
 | `MAX_DAY_OFF_PER_WEEK` | `2` | Day-off requests allowed per person per week. |
 | `DEMO_DATA` | `true` (off in production) | Seed sample data into an empty database. |
 | `CORS_ALLOWED_ORIGINS` | empty | Only needed if the site and API are on different domains. |

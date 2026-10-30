@@ -1,7 +1,9 @@
 package com.example.schedulingsoftware.auth;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -45,6 +47,17 @@ class LoginAttemptServiceTest {
         assertThrows(LoginAttemptService.TooManyAttemptsException.class,
                 () -> attempts.checkAllowed("someone-new@example.com", "9.9.9.9"));
         assertDoesNotThrow(() -> attempts.checkAllowed("someone-new@example.com", "8.8.8.8"));
+    }
+
+    @Test
+    void forgetsOldFailuresSoMadeUpEmailsCantFillMemory() {
+        for (int i = 0; i < 50; i++) {
+            attempts.recordFailure("made-up-" + i + "@example.com", "7.7.7." + i);
+        }
+        assertTrue(attempts.trackedKeys() >= 100);
+        clock.advance(Duration.ofMinutes(16));
+        attempts.forgetOldFailures();
+        assertEquals(0, attempts.trackedKeys());
     }
 
     private static final class MutableClock extends Clock {
