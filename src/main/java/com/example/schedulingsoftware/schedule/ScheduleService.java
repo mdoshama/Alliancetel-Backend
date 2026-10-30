@@ -483,6 +483,50 @@ public class ScheduleService {
     }
 
     /**
+     * The opposite of {@link #applyApprovedDayOff}: a day off that is no longer approved becomes a work day again on
+     * that week's schedule (draft or published), at their home store when it's open. Returns a sentence describing
+     * the change, or null if there was nothing to change.
+     */
+    @Transactional
+    public String revokeApprovedDayOff(Employee employee, LocalDate date) {
+        if (employee.getArea() == null) {
+            return null;
+        }
+        Optional<WeeklySchedule> found = scheduleRepository
+                .findByAreaIdAndWeekStart(employee.getArea().getId(), DayOffService.weekStart(date));
+        if (found.isEmpty()) {
+            return null;
+        }
+        WeeklySchedule schedule = found.get();
+        ScheduleEntry target = schedule.getEntries().stream()
+                .filter(e -> e.getEmployee().getId().equals(employee.getId()))
+                .filter(e -> e.getWorkDate().equals(date))
+                .findFirst().orElse(null);
+        if (target == null || target.getType() != DayType.REQUESTED_OFF) {
+            return null;
+        }
+        boolean open = anyStoreOpen(schedule, date);
+        target.setType(open ? DayType.WORK : DayType.OFF);
+        Store home = homeStoreOf(employee);
+        target.setStore(open && home != null && home.isOpenOn(date) ? home : null);
+        target.setAutoAssigned(false);
+        target.setManuallyEdited(false);
+        assignStores(schedule);
+        schedule.setUpdatedAt(Instant.now());
+        boolean published = schedule.getStatus() == ScheduleStatus.PUBLISHED;
+        if (published) {
+            notifier.publishedWeekChanged(schedule, employee.getId());
+        }
+        if (!open) {
+            return null;
+        }
+        String where = target.getStore() == null ? "" : " at " + target.getStore().getName();
+        return employee.getFirstName() + " is back to work on " + dayName(date) + where + " in the "
+                + (published ? "published" : "draft") + " schedule."
+                + (published ? " Let the team know the published week changed." : "");
+    }
+
+    /**
      * What approving a pending day off would do to staffing that week: who else is off, how many people would still
      * be working, and whether any store would fall below its minimum. Uses the week's schedule if it exists (keeping
      * changes made by hand); otherwise it plans the week the way "Generate" would.

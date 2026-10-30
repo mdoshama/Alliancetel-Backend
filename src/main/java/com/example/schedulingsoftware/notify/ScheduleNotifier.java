@@ -95,6 +95,19 @@ public class ScheduleNotifier {
                 "Hi " + e.getFirstName() + ",\n\nYour day-off request for " + when + " was " + result + ".\n\n" + extra);
     }
 
+    /** Tells the person a decision already made on their day off was changed, and why. */
+    public void dayOffDecisionChanged(DayOffRequest request, boolean nowApproved, String reason) {
+        Employee e = request.getEmployee();
+        String when = day(request.getOffDate(), true);
+        String result = nowApproved ? "changed to approved" : "changed to not approved";
+        String extra = "Reason: " + reason.trim() + (nowApproved ? " Enjoy your day off."
+                : " You're scheduled to work that day; check your schedule.");
+        queue(e, NotificationKind.DAY_OFF_DECISION, List.of(e.getFirstName(), when, result, extra),
+                "Update: your day off on " + when + " was " + result,
+                "Hi " + e.getFirstName() + ",\n\nThe decision on your day-off request for " + when + " was " + result
+                        + ".\n\n" + extra);
+    }
+
     /** A message from a manager or admin to everyone active in an area. @return people it was queued for */
     public int announce(Area area, List<Employee> people, String fromName, String message) {
         int n = 0;

@@ -307,6 +307,52 @@ public class DayOffService {
         return rejected;
     }
 
+    /**
+     * A manager (of the person's area) or an admin changes a decision already made: approved becomes rejected, or
+     * rejected becomes approved. A reason is required; it is kept on the request and sent to the employee. The week's
+     * schedule follows: a revoked day off becomes a work day again, a newly approved one is taken off.
+     */
+    @Transactional
+    public DayOffResponse changeDecision(Long id, DayOffStatus newStatus, String reason) {
+        DayOffRequest r = get(id);
+        CurrentUser user = accessPolicy.current();
+        accessPolicy.requireManagerOf(areaOf(r.getEmployee()));
+        if (r.getEmployee().getId().equals(user.id()) && !user.isAdmin()) {
+            throw new AccessDeniedException("You cannot change the decision on your own request. An admin can.");
+        }
+        String why = InputRules.clean(reason);
+        if (why == null) {
+            throw new BusinessRuleException("Give a reason for changing the decision.");
+        }
+        if (newStatus == null || newStatus == DayOffStatus.PENDING) {
+            throw new BusinessRuleException("A decision can only be changed to approved or rejected.");
+        }
+        DayOffStatus old = r.getStatus();
+        if (old == DayOffStatus.PENDING) {
+            throw new BusinessRuleException("This request hasn't been decided yet. Approve or reject it instead.");
+        }
+        if (old == newStatus) {
+            throw new BusinessRuleException("This request is already " + old.name().toLowerCase() + ".");
+        }
+        if (r.getOffDate().isBefore(LocalDate.now())) {
+            throw new BusinessRuleException(dayName(r.getOffDate()) + " has already passed, so the decision can't be "
+                    + "changed.");
+        }
+        r.setPreviousStatus(old);
+        r.setStatus(newStatus);
+        r.setDecisionChangedBy(user.fullName());
+        r.setDecisionChangeReason(why);
+        r.setDecisionChangedAt(Instant.now());
+        r.setReviewedAt(Instant.now());
+        repository.flush();
+
+        String update = newStatus == DayOffStatus.APPROVED
+                ? scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate())
+                : scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate());
+        notifier.dayOffDecisionChanged(r, newStatus == DayOffStatus.APPROVED, why);
+        return DayOffResponse.from(r).withScheduleUpdate(update);
+    }
+
     /** Employees can withdraw a request while it is still pending. */
     @Transactional
     public void cancel(Long id) {

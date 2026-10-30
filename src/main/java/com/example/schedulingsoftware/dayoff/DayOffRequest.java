@@ -62,6 +62,19 @@ public class DayOffRequest {
 
     private Instant reviewedAt;
 
+    /** Set when a manager or admin changed the decision after it was made: what it was before, who, when and why. */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private DayOffStatus previousStatus;
+
+    @Column(length = 120)
+    private String decisionChangedBy;
+
+    @Column(length = 255)
+    private String decisionChangeReason;
+
+    private Instant decisionChangedAt;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 

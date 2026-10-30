@@ -57,6 +57,13 @@ public final class DayOffDtos {
     public record ApproveManyResult(List<DayOffResponse> approved, List<SkippedRequest> skipped) {
     }
 
+    /** Change an approved or rejected request to the other decision. The reason is required and kept on the request. */
+    public record ChangeDecisionRequest(
+            @NotNull DayOffStatus status,
+            @jakarta.validation.constraints.NotBlank(message = "is required when changing a decision")
+            @Size(max = 255) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG) String reason) {
+    }
+
     public record ReviewDayOffRequest(
             @Size(max = 255) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG) String note) {
     }
@@ -76,12 +83,18 @@ public final class DayOffDtos {
             String reviewNote,
             Instant reviewedAt,
             Instant createdAt,
+            /** If the decision was changed later: the earlier decision, who changed it, why and when (else null). */
+            DayOffStatus previousStatus,
+            String decisionChangedBy,
+            String decisionChangeReason,
+            Instant decisionChangedAt,
             /** After approval: how that week's existing schedule was updated, or null if there was none. */
             String scheduleUpdate) {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
-                    reason, emergency, status, reviewNote, reviewedAt, createdAt, update);
+                    reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
+                    decisionChangeReason, decisionChangedAt, update);
         }
 
         public static DayOffResponse from(DayOffRequest r) {
@@ -101,6 +114,10 @@ public final class DayOffDtos {
                     r.getReviewNote(),
                     r.getReviewedAt(),
                     r.getCreatedAt(),
+                    r.getPreviousStatus(),
+                    r.getDecisionChangedBy(),
+                    r.getDecisionChangeReason(),
+                    r.getDecisionChangedAt(),
                     null);
         }
     }

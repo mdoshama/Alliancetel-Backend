@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.schedulingsoftware.common.PageResponse;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.ApproveManyRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.ApproveManyResult;
+import com.example.schedulingsoftware.dayoff.DayOffDtos.ChangeDecisionRequest;
 
 import com.example.schedulingsoftware.dayoff.DayOffDtos.CreateDayOffRequest;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse;
@@ -95,6 +96,12 @@ public class DayOffController {
     @PostMapping("/{id}/reject")
     public DayOffResponse reject(@PathVariable Long id, @Valid @RequestBody(required = false) ReviewDayOffRequest body) {
         return dayOffService.reject(id, body == null ? null : body.note());
+    }
+
+    /** Managers and admins: change an approved request to rejected (or back), with a required reason. */
+    @PostMapping("/{id}/change-decision")
+    public DayOffResponse changeDecision(@PathVariable Long id, @Valid @RequestBody ChangeDecisionRequest body) {
+        return dayOffService.changeDecision(id, body.status(), body.reason());
     }
 
     @DeleteMapping("/{id}")

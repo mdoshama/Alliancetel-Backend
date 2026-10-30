@@ -331,6 +331,55 @@ class DayOffApprovalIntegrationTest {
                 () -> scheduleService.updateEntry(opened.id(), benThu, DayType.REQUESTED_OFF, null));
     }
 
+    @Test
+    void managerCanRevokeAnApprovedDayOffWithAReason() {
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        LocalDate date = workDayWithFullStaff(s, anna).date();
+        Long request = dayOffService.create(new CreateDayOffRequest(anna, List.of(date), null, null)).getFirst().id();
+        dayOffService.approve(request, null);
+
+        TestUsers.signInAs(ben, Role.MANAGER, area);
+        DayOffResponse changed = dayOffService.changeDecision(request, DayOffStatus.REJECTED, "Store event that day");
+
+        assertEquals(DayOffStatus.REJECTED, changed.status());
+        assertEquals(DayOffStatus.APPROVED, changed.previousStatus());
+        assertEquals("Store event that day", changed.decisionChangeReason());
+        assertNotNull(changed.decisionChangedBy());
+        assertNotNull(changed.decisionChangedAt());
+        assertTrue(changed.scheduleUpdate().contains("back to work"), changed.scheduleUpdate());
+        TestUsers.signInAsAdmin();
+        ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
+        assertEquals(DayType.WORK, day(after, anna, date).type());
+        assertEquals(store, day(after, anna, date).storeId());
+
+        // And an admin can change it back.
+        DayOffResponse back = dayOffService.changeDecision(request, DayOffStatus.APPROVED, "Event moved");
+        assertEquals(DayOffStatus.APPROVED, back.status());
+        assertEquals(DayOffStatus.REJECTED, back.previousStatus());
+        assertEquals(DayType.REQUESTED_OFF, day(scheduleService.find(area, monday).orElseThrow(), anna, date).type());
+    }
+
+    @Test
+    void changingADecisionNeedsAReasonAndADecidedRequest() {
+        Long request = dayOffService.create(new CreateDayOffRequest(anna, List.of(monday.plusDays(1)), null, null))
+                .getFirst().id();
+        assertThrows(BusinessRuleException.class,
+                () -> dayOffService.changeDecision(request, DayOffStatus.REJECTED, "Too early"), "still pending");
+        dayOffService.approve(request, null);
+        assertThrows(BusinessRuleException.class, () -> dayOffService.changeDecision(request, DayOffStatus.REJECTED, " "));
+        assertThrows(BusinessRuleException.class,
+                () -> dayOffService.changeDecision(request, DayOffStatus.APPROVED, "Same"), "already approved");
+
+        // A manager of another area can't.
+        TestUsers.signInAs(ben, Role.MANAGER, area + 999);
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> dayOffService.changeDecision(request, DayOffStatus.REJECTED, "Not mine"));
+        // Nor can an employee.
+        TestUsers.signInAs(cara, Role.EMPLOYEE, area);
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> dayOffService.changeDecision(request, DayOffStatus.REJECTED, "Nope"));
+    }
+
     /** Schedules start with everyone working; a manager gives days off on the schedule. */
     private ScheduleResponse dayOff(ScheduleResponse s, Long employeeId, int day) {
         return scheduleService.updateEntry(s.id(), row(s, employeeId).days().get(day).entryId(), DayType.OFF, null);
