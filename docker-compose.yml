@@ -36,6 +36,14 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@alliancetel.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       TZ: ${TZ:-America/Los_Angeles}
+      APP_URL: ${APP_URL:-}
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
     # Not published to the internet: only the frontend container talks to it.
     expose:
       - "8080"

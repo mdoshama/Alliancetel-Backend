@@ -130,6 +130,88 @@ Take a manual backup (Postgres → Backups) before deploying anything that chang
 | Site loads but sign-in says "Cannot reach the server" | The backend service must be named `backend` and have `PORT=8080`; the frontend's `BACKEND_URL` must match. |
 | `${{Postgres.PGHOST}}` stays empty | The database service must be named exactly `Postgres` (or change the references to its name). |
 
+### Email messages
+
+The app emails each employee their schedule through **Resend** (resend.com). Railway blocks ordinary SMTP email on
+its Free and Hobby plans, so the app uses Resend's web API instead, which works on every plan. Resend's free plan
+covers 3,000 emails a month (100 a day). Until these steps are done, emails are only recorded on the **Messages**
+page (status *Not sent*).
+
+1. **Sign up** at [resend.com](https://resend.com).
+2. **Verify a domain.** *Domains → Add domain* → enter a subdomain of your site, e.g. `mail.yourdomain.com`.
+   Resend shows a few DNS records (TXT for SPF and DKIM, and an MX). In **Namecheap → Domain List → Manage → Advanced
+   DNS**, add each one exactly as shown (in the Host field, leave off your main domain, e.g. `resend._domainkey.mail`
+   instead of `resend._domainkey.mail.yourdomain.com`). Back in Resend click **Verify DNS records**; it usually turns
+   *Verified* within minutes.
+3. **Create an API key.** *API Keys → Create API Key*, permission **Sending access**, optionally limited to that
+   domain. Copy it now (it starts with `re_` and is shown once).
+4. **Railway → backend service → Variables**, add:
+
+   | Variable | Value |
+   |---|---|
+   | `EMAIL_ENABLED` | `true` |
+   | `RESEND_API_KEY` | the key from step 3 |
+   | `EMAIL_FROM` | `AllianceTel <schedule@mail.yourdomain.com>` (any name before the @, on the verified domain) |
+   | `EMAIL_REPLY_TO` | optional, e.g. a manager's address, so replies reach a person |
+   | `APP_URL` | your site, e.g. `https://yourdomain.com` (the button in each email opens it) |
+
+   The backend restarts. The Messages page now shows **Email connected**.
+5. **Try it.** Publish a week, or send an announcement from the Messages page; each email turns *Sent* within a few
+   seconds. If one fails, the Messages page shows Resend's reason, e.g. *domain is not verified* (step 2) or *daily
+   quota exceeded* (more than 100 in a day on the free plan); fix it, then **Try again**.
+
+Before verifying a domain you can test by setting `EMAIL_FROM` to `AllianceTel <onboarding@resend.dev>`, but Resend
+then only delivers to the email address you signed up with.
+
+### WhatsApp messages
+
+Optional, and can be added any time after email. The app sends each employee their schedule on WhatsApp through
+Meta's **WhatsApp Cloud API**. Until these steps are done, no WhatsApp messages are made; email keeps working.
+
+1. **Meta Business account and app.** At [business.facebook.com](https://business.facebook.com) create (or use) your
+   business. At [developers.facebook.com](https://developers.facebook.com) → *My Apps* → *Create app* → type
+   *Business*, then add the **WhatsApp** product.
+2. **A phone number for WhatsApp.** In *WhatsApp Manager → Phone numbers*, add the number messages will come from
+   (it can't already be used in the WhatsApp app). Verify it, and set the display name (e.g. "AllianceTel").
+   Copy its **Phone number ID** (a long number, not the phone number itself).
+3. **A permanent access token.** *Business settings → Users → System users* → add a system user (Admin) → *Add
+   assets*: your app (full control) and your WhatsApp account → *Generate new token* for the app with the
+   permissions `whatsapp_business_messaging` and `whatsapp_business_management`, set to never expire. Copy it now;
+   it's shown once. (The 24-hour token on the app's *API Setup* page is only for trying things out.)
+4. **Four message templates.** *WhatsApp Manager → Message templates → Create template*, category **Utility**,
+   language **English (US)**, with exactly these names and bodies (the admin's Messages page shows them with Copy
+   buttons). Add a sample for each {{n}} when asked, and wait for each to be **Approved**.
+
+   | Name | Body |
+   |---|---|
+   | `schedule_published` | `Hi {{1}}, your AllianceTel schedule for {{2}} is posted: {{3}}. See it anytime at {{4}}.` |
+   | `schedule_changed` | `Hi {{1}}, your AllianceTel schedule for {{2}} has changed: {{3}}. See your full week at {{4}}.` |
+   | `day_off_update` | `Hi {{1}}, your day-off request for {{2}} was {{3}}. {{4}}` |
+   | `team_announcement` | `Message from {{1}} for the AllianceTel {{2}} team: {{3}}` |
+
+5. **Railway → backend service → Variables**, add:
+
+   | Variable | Value |
+   |---|---|
+   | `WHATSAPP_ENABLED` | `true` |
+   | `WHATSAPP_PHONE_NUMBER_ID` | the Phone number ID from step 2 |
+   | `WHATSAPP_ACCESS_TOKEN` | the token from step 3 |
+   | `APP_URL` | your site, e.g. `https://alliancetel.com` (used in the link at the end of messages) |
+
+   The backend restarts. The Messages page now says *WhatsApp is connected*.
+6. **Phone numbers and agreement.** Add each employee's mobile number (any format; it's saved as +1…), and tick
+   *Agreed to get schedule updates on WhatsApp* once they've agreed, or let them switch it on from their account
+   menu. Publish a week and watch the Messages page: each message turns *Sent* within a few seconds.
+
+Good to know:
+- Meta charges per template message (rates depend on the country and category; see Meta's WhatsApp pricing page),
+  billed to the payment method on your WhatsApp account. New accounts start with a daily messaging limit that rises
+  with use.
+- If a message fails, the Messages page shows WhatsApp's reason, e.g. *Template name does not exist* (the name or
+  language doesn't match an approved template) or *Receiver is incapable of receiving this message* (that number
+  isn't on WhatsApp). Fix it, then **Try again**.
+- Run a single backend instance (the Railway default), so each message is sent once.
+
 ---
 
 ## Option B — Your own server with Docker

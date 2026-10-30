@@ -23,6 +23,7 @@ import org.springframework.security.access.AccessDeniedException;
 import com.example.schedulingsoftware.auth.AccessPolicy;
 import com.example.schedulingsoftware.auth.CurrentUser;
 import com.example.schedulingsoftware.common.BusinessRuleException;
+import com.example.schedulingsoftware.common.InputRules;
 import com.example.schedulingsoftware.common.PageResponse;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.dayoff.DayOffDtos.ApproveManyResult;
@@ -33,6 +34,7 @@ import com.example.schedulingsoftware.dayoff.DayOffDtos.TakenDay;
 import com.example.schedulingsoftware.employee.Employee;
 import com.example.schedulingsoftware.employee.EmployeeService;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.DayRoom;
+import com.example.schedulingsoftware.notify.ScheduleNotifier;
 import com.example.schedulingsoftware.schedule.ScheduleService;
 
 import jakarta.persistence.criteria.Predicate;
@@ -46,17 +48,20 @@ public class DayOffService {
     private final EmployeeService employeeService;
     private final AccessPolicy accessPolicy;
     private final ScheduleService scheduleService;
+    private final ScheduleNotifier notifier;
     private final int maxPerWeek;
 
     public DayOffService(DayOffRequestRepository repository,
             EmployeeService employeeService,
             AccessPolicy accessPolicy,
             ScheduleService scheduleService,
+            ScheduleNotifier notifier,
             @Value("${alliancetel.scheduling.max-day-off-requests-per-week:2}") int maxPerWeek) {
         this.repository = repository;
         this.employeeService = employeeService;
         this.accessPolicy = accessPolicy;
         this.scheduleService = scheduleService;
+        this.notifier = notifier;
         this.maxPerWeek = maxPerWeek;
     }
 
@@ -102,7 +107,7 @@ public class DayOffService {
                 predicates.add(cb.lessThanOrEqualTo(root.get("offDate"), to));
             }
             if (query != null && !query.isBlank()) {
-                String like = "%" + EmployeeService.escapeLike(query.trim().toLowerCase(Locale.ROOT)) + "%";
+                String like = "%" + EmployeeService.escapeLike(EmployeeService.shorten(query).toLowerCase(Locale.ROOT)) + "%";
                 var employee = root.get("employee");
                 predicates.add(cb.or(
                         cb.like(cb.lower(employee.get("firstName")), like, '\\'),
@@ -135,6 +140,9 @@ public class DayOffService {
         // Group the requested dates by week (Monday) so the weekly limit is checked per week.
         Map<LocalDate, Integer> requestedPerWeek = new LinkedHashMap<>();
         for (LocalDate date : dates) {
+            if (date.isAfter(today.plusYears(1))) {
+                throw new BusinessRuleException("Days off can be requested up to a year ahead (" + date + " is too far).");
+            }
             if (date.isBefore(today)) {
                 throw new BusinessRuleException("Cannot request a day off in the past (" + date + ").");
             }
@@ -177,7 +185,7 @@ public class DayOffService {
             DayOffRequest r = new DayOffRequest();
             r.setEmployee(employee);
             r.setOffDate(date);
-            r.setReason(request.reason());
+            r.setReason(InputRules.clean(request.reason()));
             r.setEmergency(emergency);
             created.add(DayOffResponse.from(repository.save(r)));
         }
@@ -248,6 +256,7 @@ public class DayOffService {
         DayOffResponse approved = review(id, DayOffStatus.APPROVED, note);
         // If that week's schedule was already made, the person must not stay scheduled to work that day.
         DayOffRequest r = get(id);
+        notifier.dayOffDecided(r, true, r.getReviewNote());
         return approved.withScheduleUpdate(scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate()));
     }
 
@@ -292,7 +301,10 @@ public class DayOffService {
 
     @Transactional
     public DayOffResponse reject(Long id, String note) {
-        return review(id, DayOffStatus.REJECTED, note);
+        DayOffResponse rejected = review(id, DayOffStatus.REJECTED, note);
+        DayOffRequest r = get(id);
+        notifier.dayOffDecided(r, false, r.getReviewNote());
+        return rejected;
     }
 
     /** Employees can withdraw a request while it is still pending. */
@@ -320,7 +332,7 @@ public class DayOffService {
             throw new BusinessRuleException("This request was already " + r.getStatus().name().toLowerCase() + ".");
         }
         r.setStatus(newStatus);
-        r.setReviewNote(note);
+        r.setReviewNote(InputRules.clean(note));
         r.setReviewedAt(Instant.now());
         return DayOffResponse.from(r);
     }

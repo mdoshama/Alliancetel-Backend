@@ -77,6 +77,16 @@ public class Employee {
     @Column(nullable = false)
     private boolean active = true;
 
+    /** Agreed to get schedule updates on WhatsApp (needed before any message is sent). */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    private boolean whatsappOptIn;
+
+    /** Gets schedule updates by email (on unless they turn it off). */
+    @Column(nullable = false)
+    @ColumnDefault("true")
+    private boolean emailOptIn = true;
+
     /** BCrypt hash. Null means this person has no login yet. */
     @Column(length = 100)
     private String passwordHash;

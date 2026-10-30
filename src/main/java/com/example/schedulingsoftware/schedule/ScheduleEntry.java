@@ -66,6 +66,13 @@ public class ScheduleEntry {
     @Column(nullable = false)
     private boolean manuallyEdited;
 
+    /**
+     * How this day read when the week was last published (e.g. "Oceanside 10am–8pm" or "Off"), so a later change can
+     * be sent to just the people whose days changed. Null until first published.
+     */
+    @Column(length = 120)
+    private String publishedLabel;
+
     public ScheduleEntry(WeeklySchedule schedule, Employee employee, LocalDate workDate, DayType type, Store store) {
         this.schedule = schedule;
         this.employee = employee;

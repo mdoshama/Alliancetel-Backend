@@ -15,6 +15,8 @@ import com.example.schedulingsoftware.area.AreaService;
 import com.example.schedulingsoftware.auth.AccessPolicy;
 import com.example.schedulingsoftware.auth.PasswordPolicy;
 import com.example.schedulingsoftware.common.BusinessRuleException;
+import com.example.schedulingsoftware.common.PhoneNumbers;
+import com.example.schedulingsoftware.common.InputRules;
 import com.example.schedulingsoftware.common.PageResponse;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.employee.EmployeeDtos.CredentialsResponse;
@@ -95,7 +97,7 @@ public class EmployeeService {
                 }
             }
             if (query != null && !query.isBlank()) {
-                String like = "%" + escapeLike(query.trim().toLowerCase(Locale.ROOT)) + "%";
+                String like = "%" + escapeLike(shorten(query).toLowerCase(Locale.ROOT)) + "%";
                 // "ana lopez" also matches first + last name together.
                 predicates.add(cb.or(
                         cb.like(cb.lower(root.get("firstName")), like, '\\'),
@@ -106,6 +108,12 @@ public class EmployeeService {
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    /** A search term trimmed and cut to 100 characters. */
+    public static String shorten(String query) {
+        String q = query.trim();
+        return q.length() > 100 ? q.substring(0, 100) : q;
     }
 
     /** Makes % and _ in a search match themselves. */
@@ -122,7 +130,7 @@ public class EmployeeService {
 
     @Transactional
     public CredentialsResponse create(EmployeeRequest request) {
-        String code = request.employeeCode().trim();
+        String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (employeeRepository.existsByEmployeeCodeIgnoreCase(code)) {
             throw new BusinessRuleException("Employee code '" + code + "' is already in use.");
@@ -141,7 +149,7 @@ public class EmployeeService {
     @Transactional
     public EmployeeResponse update(Long id, EmployeeRequest request) {
         Employee employee = getEmployee(id);
-        String code = request.employeeCode().trim();
+        String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (employeeRepository.existsByEmployeeCodeIgnoreCaseAndIdNot(code, id)) {
             throw new BusinessRuleException("Employee code '" + code + "' is already in use.");
@@ -213,10 +221,10 @@ public class EmployeeService {
             throw new BusinessRuleException("You cannot remove your own admin access.");
         }
         employee.setEmployeeCode(code);
-        employee.setFirstName(request.firstName().trim());
-        employee.setLastName(request.lastName().trim());
+        employee.setFirstName(InputRules.clean(request.firstName()));
+        employee.setLastName(InputRules.clean(request.lastName()));
         employee.setEmail(email);
-        employee.setPhone(request.phone());
+        employee.setPhone(PhoneNumbers.normalize(request.phone()));
         employee.setRole(request.role());
         employee.setArea(request.areaId() == null ? null : areaService.getArea(request.areaId()));
         employee.setHomeStore(request.homeStoreId() == null ? null
@@ -228,6 +236,18 @@ public class EmployeeService {
             employee.setPrimaryAtStore(false);
         }
         employee.setWorkDaysPerWeek(request.workDaysPerWeek());
+        if (request.whatsappOptIn() != null) {
+            if (request.whatsappOptIn() && employee.getPhone() == null) {
+                throw new BusinessRuleException("Add a phone number to send WhatsApp schedule updates.");
+            }
+            employee.setWhatsappOptIn(request.whatsappOptIn());
+        }
+        if (employee.getPhone() == null) {
+            employee.setWhatsappOptIn(false);
+        }
+        if (request.emailOptIn() != null) {
+            employee.setEmailOptIn(request.emailOptIn());
+        }
         if (request.active() != null) {
             employee.setActive(request.active());
         }

@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.example.schedulingsoftware.area.Area;
 import com.example.schedulingsoftware.area.AreaService;
 import com.example.schedulingsoftware.auth.AccessPolicy;
+import com.example.schedulingsoftware.notify.ScheduleNotifier;
 import com.example.schedulingsoftware.auth.CurrentUser;
 import com.example.schedulingsoftware.common.BusinessRuleException;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
@@ -72,6 +73,7 @@ public class ScheduleService {
     private final StoreService storeService;
     private final StoreRepository storeRepository;
     private final StoreAssigner storeAssigner;
+    private final ScheduleNotifier notifier;
 
     @Transactional
     public Optional<ScheduleResponse> find(Long areaId, LocalDate anyDayInWeek) {
@@ -101,6 +103,9 @@ public class ScheduleService {
         if (changed) {
             assignStores(schedule);
             schedule.setUpdatedAt(Instant.now());
+            if (schedule.getStatus() == ScheduleStatus.PUBLISHED) {
+                notifier.publishedWeekChanged(schedule, null);
+            }
         }
     }
 
@@ -113,6 +118,10 @@ public class ScheduleService {
     public ScheduleResponse generate(Long areaId, LocalDate anyDayInWeek) {
         LocalDate weekStart = DayOffService.weekStart(anyDayInWeek);
         accessPolicy.requireManagerOf(areaId);
+        LocalDate today = LocalDate.now();
+        if (weekStart.isAfter(today.plusYears(1)) || weekStart.isBefore(today.minusYears(1))) {
+            throw new BusinessRuleException("Schedules can be made for weeks up to a year ahead or back.");
+        }
         Area area = areaService.getArea(areaId);
         if (!area.isActive()) {
             throw new BusinessRuleException("Area '" + area.getName() + "' is inactive.");
@@ -414,6 +423,8 @@ public class ScheduleService {
         ensureApprovedDaysOff(schedule);
         schedule.setStatus(ScheduleStatus.PUBLISHED);
         schedule.setPublishedAt(Instant.now());
+        // WhatsApp: everyone's week the first time; after changes, only the people whose days changed.
+        notifier.weekPublished(schedule);
         return toResponse(schedule);
     }
 
@@ -450,6 +461,10 @@ public class ScheduleService {
         assignStores(schedule);
         schedule.setUpdatedAt(Instant.now());
         boolean published = schedule.getStatus() == ScheduleStatus.PUBLISHED;
+        if (published) {
+            // Others moved to cover hear about it; the person themselves gets the day-off decision message.
+            notifier.publishedWeekChanged(schedule, employee.getId());
+        }
         StringBuilder text = new StringBuilder(employee.getFirstName() + " is now off on " + dayName(date) + " in the "
                 + (published ? "published" : "draft") + " schedule.");
         if (change.backToWork() != null) {

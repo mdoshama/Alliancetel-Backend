@@ -49,6 +49,23 @@ public class AuthService {
     }
 
     @Transactional
+    public Me setWhatsapp(boolean optIn) {
+        Employee e = load(accessPolicy.current().id());
+        if (optIn && e.getPhone() == null) {
+            throw new BusinessRuleException("There's no phone number on file for you. Ask your manager to add it.");
+        }
+        e.setWhatsappOptIn(optIn);
+        return Me.from(e);
+    }
+
+    @Transactional
+    public Me setEmailUpdates(boolean optIn) {
+        Employee e = load(accessPolicy.current().id());
+        e.setEmailOptIn(optIn);
+        return Me.from(e);
+    }
+
+    @Transactional
     public LoginResponse changePassword(String currentPassword, String newPassword) {
         Employee e = load(accessPolicy.current().id());
         if (!passwordEncoder.matches(currentPassword, e.getPasswordHash())) {

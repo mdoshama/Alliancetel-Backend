@@ -2,6 +2,7 @@ package com.example.schedulingsoftware.auth;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,6 +32,18 @@ public class AuthController {
     @GetMapping("/me")
     public Me me() {
         return authService.me();
+    }
+
+    /** Anyone can turn their own WhatsApp schedule updates on (if they have a phone number on file) or off. */
+    @PutMapping("/me/whatsapp")
+    public Me whatsapp(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {
+        return authService.setWhatsapp(body.optIn());
+    }
+
+    /** Anyone can turn their own email schedule updates off or back on. */
+    @PutMapping("/me/email")
+    public Me email(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {
+        return authService.setEmailUpdates(body.optIn());
     }
 
     /** Returns a fresh token, since the old one belonged to a session with a temporary password. */

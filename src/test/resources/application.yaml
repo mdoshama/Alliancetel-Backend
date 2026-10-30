@@ -13,3 +13,5 @@ alliancetel:
     max-day-off-requests-per-week: 2
   demo-data:
     enabled: false
+  # The WhatsApp sender is called directly in tests.
+  background-jobs: false

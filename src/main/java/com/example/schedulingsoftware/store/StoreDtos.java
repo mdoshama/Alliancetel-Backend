@@ -1,5 +1,6 @@
 package com.example.schedulingsoftware.store;
 
+import com.example.schedulingsoftware.common.InputRules;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.util.Arrays;
@@ -20,14 +21,14 @@ public final class StoreDtos {
 
     public record StoreRequest(
             @NotNull Long areaId,
-            @NotBlank @Size(max = 100) String name,
-            @Size(max = 12) String code,
-            @Size(max = 255) String address,
+            @NotBlank @Size(max = 100) @Pattern(regexp = InputRules.PLACE_NAME, message = InputRules.PLACE_NAME_MSG) String name,
+            @Size(max = 12) @Pattern(regexp = InputRules.CODE, message = InputRules.CODE_MSG) String code,
+            @Size(max = 255) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG) String address,
             /** Defaults to 1 when left out. */
             @Min(0) @Max(50) Integer minStaffPerDay,
             Boolean active,
             /** Opening hours for any weekdays being set; days left out use 10:00–20:00. Null keeps the current hours. */
-            @Valid List<DayHours> hours,
+            @Valid @Size(max = 7, message = "can list each weekday only once") List<DayHours> hours,
             /** Hex color like "#2563EB". Null keeps the current color (new stores get an unused palette color). */
             @Pattern(regexp = "^#[0-9a-fA-F]{6}$", message = "must be a color like #2563EB") String color) {
     }

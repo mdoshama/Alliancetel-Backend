@@ -10,6 +10,7 @@ import com.example.schedulingsoftware.area.AreaDtos.AreaRequest;
 import com.example.schedulingsoftware.auth.AccessPolicy;
 import com.example.schedulingsoftware.area.AreaDtos.AreaResponse;
 import com.example.schedulingsoftware.common.BusinessRuleException;
+import com.example.schedulingsoftware.common.InputRules;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.employee.EmployeeRepository;
 
@@ -43,11 +44,11 @@ public class AreaService {
 
     @Transactional
     public AreaResponse create(AreaRequest request) {
-        String name = request.name().trim();
+        String name = InputRules.clean(request.name());
         if (areaRepository.existsByNameIgnoreCase(name)) {
             throw new BusinessRuleException("An area named '" + name + "' already exists.");
         }
-        Area area = new Area(name, request.description());
+        Area area = new Area(name, InputRules.clean(request.description()));
         if (request.active() != null) {
             area.setActive(request.active());
         }
@@ -57,12 +58,12 @@ public class AreaService {
     @Transactional
     public AreaResponse update(Long id, AreaRequest request) {
         Area area = getArea(id);
-        String name = request.name().trim();
+        String name = InputRules.clean(request.name());
         if (areaRepository.existsByNameIgnoreCaseAndIdNot(name, id)) {
             throw new BusinessRuleException("An area named '" + name + "' already exists.");
         }
         area.setName(name);
-        area.setDescription(request.description());
+        area.setDescription(InputRules.clean(request.description()));
         if (request.active() != null) {
             area.setActive(request.active());
         }

@@ -1,5 +1,7 @@
 package com.example.schedulingsoftware.dayoff;
 
+import jakarta.validation.constraints.Pattern;
+import com.example.schedulingsoftware.common.InputRules;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -17,8 +19,8 @@ public final class DayOffDtos {
     /** One request may cover several dates, e.g. Tuesday and Wednesday of the same week. */
     public record CreateDayOffRequest(
             @NotNull Long employeeId,
-            @NotEmpty @Size(max = 7) List<@NotNull LocalDate> dates,
-            @Size(max = 255) String reason,
+            @NotEmpty @Size(max = 7, message = "can have at most 7 days") List<@NotNull LocalDate> dates,
+            @Size(max = 255) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG) String reason,
             /** Urgent: allowed even if a colleague at the same store is off, and outside the weekly limit. */
             Boolean emergency) {
     }
@@ -44,7 +46,8 @@ public final class DayOffDtos {
      * @param onlyIfCovered skip (leave pending) any request that would leave a store below its minimum
      */
     public record ApproveManyRequest(@jakarta.validation.constraints.NotEmpty
-            @jakarta.validation.constraints.Size(max = 200) List<Long> ids, Boolean onlyIfCovered) {
+            @jakarta.validation.constraints.Size(max = 200, message = "can have at most 200 requests") List<@NotNull Long> ids,
+            Boolean onlyIfCovered) {
     }
 
     /** A request left pending by "approve all", and why. */
@@ -54,7 +57,8 @@ public final class DayOffDtos {
     public record ApproveManyResult(List<DayOffResponse> approved, List<SkippedRequest> skipped) {
     }
 
-    public record ReviewDayOffRequest(@Size(max = 255) String note) {
+    public record ReviewDayOffRequest(
+            @Size(max = 255) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG) String note) {
     }
 
     public record DayOffResponse(

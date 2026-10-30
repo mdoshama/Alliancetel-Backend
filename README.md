@@ -85,6 +85,37 @@ browser ──► frontend (nginx: Angular site, forwards /api) ──► backen
   are locked: they can't be turned into work or edited by hand, and opening or publishing a week re-checks that
   every approved day is off.
 
+### Email and WhatsApp messages
+
+Employees hear about their schedule by **email** (on by default) and, once it's connected, on **WhatsApp**:
+
+| When | Who gets a message | What it says |
+|---|---|---|
+| A week is **published** | Everyone on it | Their own week: each day's store and hours, or Off, and a link |
+| A published week **changes** (republished after edits, or an approved day off moves people) | Only people whose days changed | Just the changed days: "Wed 11/4 now Off (was Oceanside 10am–8pm)" |
+| A **day off** is approved or rejected | The person who asked | The decision and the manager's note |
+| An **announcement** (Messages page) | Everyone in the area | The message, from the manager or admin |
+
+- **Email** goes to each person's work email through [Resend](https://resend.com)'s web API (Railway blocks
+  ordinary SMTP email on its Free and Hobby plans). It's on for everyone; people can turn it off in their account
+  menu (top right), or a manager can in the employee's details.
+- **WhatsApp** (Meta WhatsApp Cloud API) is optional and can be connected later. People must agree first (Meta's
+  rule): a manager ticks "Agreed to get schedule updates on WhatsApp", or the person turns it on in their account
+  menu. Until WhatsApp is connected, no WhatsApp messages are made.
+- Every message is saved with the change that caused it and sent within seconds by a background sender. Ones that
+  can't go out right away are retried; emails carry a key so the same email is never delivered twice. The
+  **Messages** page lists what went to whom (filter by channel), failures with the reason, and **Try again**.
+- Until email is connected, emails are only recorded there (status *Not sent*). How to connect email and
+  WhatsApp: [DEPLOYMENT.md](DEPLOYMENT.md#email-messages).
+
+### Input checks
+
+Every form and API request checks its values, with the same rules in the browser and on the server:
+names (letters, spaces, `-` `'` `.`), codes (letters, numbers, `-` `_`), emails (`name@example.com`), store and area
+names, and free text (no `<` `>` or line breaks). Phone numbers can be typed in any common format and are saved in
+international form (`(619) 555-0142` → `+16195550142`; other countries need `+` and the country code). Errors
+come back as plain sentences, e.g. "Phone must be a valid number, e.g. (619) 555-0142 …".
+
 ---
 
 ## Run it locally
@@ -147,6 +178,15 @@ Every setting can be given as an environment variable.
 | `CORS_ALLOWED_ORIGINS` | empty | Only needed if the site and API are on different domains. |
 | `PORT` | `8080` | HTTP port. |
 | `TZ` | `America/Los_Angeles` (Docker) | Decides what "today" and "this week" are. |
+| `APP_URL` | empty | The site's address (e.g. `https://alliancetel.com`), for links in WhatsApp messages. |
+| `EMAIL_ENABLED` | `false` | Send schedule emails (needs the next two). |
+| `RESEND_API_KEY` | empty | API key from resend.com (Sending access). |
+| `EMAIL_FROM` | empty | Sender, e.g. `AllianceTel <schedule@mail.yourdomain.com>`, on a domain verified in Resend. |
+| `EMAIL_REPLY_TO` | empty | Optional: where replies go. |
+| `WHATSAPP_ENABLED` | `false` | Send WhatsApp messages (needs the next two). |
+| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | empty | From Meta's WhatsApp Manager; see DEPLOYMENT.md. |
+| `WHATSAPP_API_VERSION` / `WHATSAPP_TEMPLATE_LANGUAGE` | `v22.0` / `en_US` | Meta Graph API version and template language. |
+| `WHATSAPP_TEMPLATE_WEEK_PUBLISHED`, `…_WEEK_CHANGED`, `…_DAY_OFF`, `…_ANNOUNCEMENT` | `schedule_published`, `schedule_changed`, `day_off_update`, `team_announcement` | Template names, if yours differ. |
 
 **Production mode** (`SPRING_PROFILES_ACTIVE=prod`, set automatically in Docker) refuses to start
 without a database, a strong `JWT_SECRET` and, on an empty database, a valid `ADMIN_PASSWORD`. It
@@ -181,6 +221,7 @@ All endpoints are under `/api` and need a sign-in token (`Authorization: Bearer 
 | Areas | `GET/POST /areas`, `GET/PUT/DELETE /areas/{id}` |
 | Stores | `GET/POST /stores`, `PUT/DELETE /stores/{id}` (hours, color, minimum) |
 | Employees | `GET /employees/page?page&size&sort&areaId&storeId&role&storeRole&active&q` (paged), `GET/POST /employees`, `GET/PUT/DELETE /employees/{id}`, `PATCH /employees/{id}/home-store` (store and primary/secondary), `POST /employees/{id}/reset-password` |
+| Messages | `GET /notifications?status&channel&page&size`, `PUT /auth/me/email` (`{optIn}`), `GET /notifications/status`, `POST /notifications/announce` (`{areaId, message}`), `POST /notifications/{id}/retry`, `PUT /auth/me/whatsapp` (`{optIn}`) |
 | Days off | `POST /day-off-requests/approve-many` (`{ids, onlyIfCovered}`), `GET /day-off-requests/page?page&size&status&areaId&from&to&q` (paged), `GET/POST /day-off-requests`, `GET /day-off-requests/taken-days?employeeId&from&to`, `GET /day-off-requests/{id}/impact`, `POST /day-off-requests/{id}/approve`, `POST /day-off-requests/{id}/reject`, `DELETE /day-off-requests/{id}` |
 | Schedules | `GET /schedules?areaId&weekStart`, `POST /schedules/generate`, `PATCH /schedules/{id}/entries/{entryId}`, `POST /schedules/{id}/swap`, `POST /schedules/{id}/swap-days`, `POST /schedules/{id}/exchange` (drag and drop), `POST /schedules/{id}/auto-assign-stores`, `POST /schedules/{id}/move-for-week`, `POST /schedules/{id}/publish`, `POST /schedules/{id}/revert-to-draft` |
 
@@ -201,9 +242,10 @@ src/main/java/com/example/schedulingsoftware/
 ├── employee/    staff, roles, home store and primary/secondary/floater
 ├── dayoff/      day-off requests and approvals
 ├── schedule/    weekly schedules, generator, store assigner, day-off planner, staffing check
+├── notify/      email (Resend) and WhatsApp (Meta) messages: queue, senders, background dispatcher, announcements
 ├── auth/        sign-in (JWT), access rules, password policy, lockout
 ├── config/      first admin and demo data
-└── common/      error handling, page responses
+└── common/      error handling, page responses, input rules, phone numbers
 ```
 
 The database tables are created and extended automatically on start-up (`ddl-auto: update`).

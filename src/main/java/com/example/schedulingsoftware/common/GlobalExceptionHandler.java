@@ -55,10 +55,18 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleValidation(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors()
-                .forEach(e -> errors.putIfAbsent(e.getField(), e.getDefaultMessage()));
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
+                .forEach(e -> errors.putIfAbsent(e.getField(), label(e.getField()) + " " + e.getDefaultMessage() + "."));
+        String detail = errors.isEmpty() ? "Some of the details aren't valid." : String.join(" ", errors.values());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
         problem.setProperty("errors", errors);
         return problem;
+    }
+
+    /** "employeeCode" → "Employee code", "hours[2].opensAt" → "Opens at", "dates[0]" → "Dates". */
+    static String label(String field) {
+        String last = field.substring(field.lastIndexOf('.') + 1).replaceAll("\\[\\d*]", "");
+        String words = last.replaceAll("([a-z])([A-Z])", "$1 $2").toLowerCase(java.util.Locale.ROOT);
+        return words.isEmpty() ? "Value" : Character.toUpperCase(words.charAt(0)) + words.substring(1);
     }
 
     @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)

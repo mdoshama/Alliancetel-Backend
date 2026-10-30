@@ -16,6 +16,7 @@ import com.example.schedulingsoftware.area.Area;
 import com.example.schedulingsoftware.area.AreaService;
 import com.example.schedulingsoftware.auth.AccessPolicy;
 import com.example.schedulingsoftware.common.BusinessRuleException;
+import com.example.schedulingsoftware.common.InputRules;
 import com.example.schedulingsoftware.common.ResourceNotFoundException;
 import com.example.schedulingsoftware.employee.EmployeeRepository;
 import com.example.schedulingsoftware.schedule.ScheduleEntryRepository;
@@ -49,7 +50,7 @@ public class StoreService {
     @Transactional
     public StoreResponse create(StoreRequest request) {
         Area area = areaService.getArea(request.areaId());
-        String name = request.name().trim();
+        String name = InputRules.clean(request.name());
         if (storeRepository.existsByAreaIdAndNameIgnoreCase(area.getId(), name)) {
             throw new BusinessRuleException(area.getName() + " already has a store named '" + name + "'.");
         }
@@ -71,7 +72,7 @@ public class StoreService {
     public StoreResponse update(Long id, StoreRequest request) {
         Store store = getStore(id);
         Area area = areaService.getArea(request.areaId());
-        String name = request.name().trim();
+        String name = InputRules.clean(request.name());
         if (storeRepository.existsByAreaIdAndNameIgnoreCaseAndIdNot(area.getId(), name, id)) {
             throw new BusinessRuleException(area.getName() + " already has a store named '" + name + "'.");
         }

@@ -64,3 +64,26 @@ alliancetel:
   demo-data:
     # Seeds sample areas/stores/staff into an empty database; sample accounts use the password Welcome123
     enabled: ${DEMO_DATA:true}
+  # Public address of the web app, used for links in WhatsApp messages, e.g. https://alliancetel.com
+  app-url: ${APP_URL:}
+  # WhatsApp schedule messages (Meta WhatsApp Cloud API). Until enabled with a phone number ID and access token,
+  # messages are only recorded on the Messages page. See README, "WhatsApp messages".
+  whatsapp:
+    enabled: ${WHATSAPP_ENABLED:false}
+    phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
+    access-token: ${WHATSAPP_ACCESS_TOKEN:}
+    api-version: ${WHATSAPP_API_VERSION:v22.0}
+    language: ${WHATSAPP_TEMPLATE_LANGUAGE:en_US}
+    template:
+      week-published: ${WHATSAPP_TEMPLATE_WEEK_PUBLISHED:schedule_published}
+      week-changed: ${WHATSAPP_TEMPLATE_WEEK_CHANGED:schedule_changed}
+      day-off: ${WHATSAPP_TEMPLATE_DAY_OFF:day_off_update}
+      announcement: ${WHATSAPP_TEMPLATE_ANNOUNCEMENT:team_announcement}
+  # Schedule emails through Resend's HTTPS API (Railway blocks SMTP mail on Free/Hobby plans). Until enabled with an
+  # API key and a sender, emails are only recorded on the Messages page. See README, "Email and WhatsApp messages".
+  email:
+    enabled: ${EMAIL_ENABLED:false}
+    resend-api-key: ${RESEND_API_KEY:}
+    # e.g. AllianceTel <schedule@notifications.yourdomain.com> (a domain verified in Resend)
+    from: ${EMAIL_FROM:}
+    reply-to: ${EMAIL_REPLY_TO:}

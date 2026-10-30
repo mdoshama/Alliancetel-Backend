@@ -74,6 +74,7 @@ public class SecurityConfig {
                                 "/api/day-off-requests/approve-many")
                                 .hasAnyRole(ADMIN, MANAGER)
                         .requestMatchers("/api/day-off-requests/**").authenticated()
+                        .requestMatchers("/api/notifications/**").hasAnyRole(ADMIN, MANAGER)
 
                         // Everyone can read a schedule (employees only once published); managers build them.
                         .requestMatchers(HttpMethod.GET, "/api/schedules/**").authenticated()
