@@ -56,6 +56,12 @@ public class WeeklySchedule {
 
     private Instant publishedAt;
 
+    /**
+     * When the manager last pressed "Save draft" (a checkpoint on the way to publishing). Null until the first save,
+     * and cleared when the draft is rebuilt from scratch.
+     */
+    private Instant draftSavedAt;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -70,7 +76,23 @@ public class WeeklySchedule {
 
     @PreUpdate
     void onUpdate() {
+        // The save itself (updatedAt == draftSavedAt) is not a change after the save. Edits set updatedAt first.
+        if (draftSavedAt != null && draftSavedAt.equals(updatedAt)) {
+            return;
+        }
         updatedAt = Instant.now();
+    }
+
+    /** Records a "Save draft" checkpoint: everything up to now is saved. */
+    public void markDraftSaved() {
+        Instant now = Instant.now();
+        draftSavedAt = now;
+        updatedAt = now;
+    }
+
+    /** True when the draft was changed after its last save (or never saved). */
+    public boolean isChangedSinceSave() {
+        return draftSavedAt == null || (updatedAt != null && updatedAt.isAfter(draftSavedAt));
     }
 
     public LocalDate getWeekEnd() {

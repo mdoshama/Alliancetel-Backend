@@ -140,6 +140,7 @@ public class ScheduleService {
 
         // Remove old rows first so the unique (schedule, employee, date) constraint is not hit on re-insert.
         schedule.getEntries().clear();
+        schedule.setDraftSavedAt(null);
         scheduleRepository.flush();
 
         List<Employee> staff = employeeRepository
@@ -213,7 +214,7 @@ public class ScheduleService {
 
     /**
      * Two employees trade their day: e.g. A at Oceanside and B at Chula Vista become A at Chula Vista and
-     * B at Oceanside. If one of them was off, the other takes over their shift and gets the day off instead.
+     * B at Oceanside. Both must be working: someone who is off that day is never given a shift by a swap.
      */
     @Transactional
     public ScheduleResponse swap(Long scheduleId, Long entryIdA, Long entryIdB) {
@@ -234,6 +235,8 @@ public class ScheduleService {
                 || (a.getType() == DayType.WORK && hasApprovedDayOff(b.getEmployee(), b.getWorkDate()))) {
             throw new BusinessRuleException("An approved day off can't be swapped away.");
         }
+        requireNotPuttingOffPersonToWork(a, b.getType());
+        requireNotPuttingOffPersonToWork(b, a.getType());
         DayType typeA = a.getType();
         Store storeA = a.getStore();
         a.setType(b.getType());
@@ -249,8 +252,9 @@ public class ScheduleService {
     }
 
     /**
-     * Drag and drop between any two days on the schedule (any person, any day): the two days trade places, e.g.
-     * Ana's Tuesday at Oceanside and Ben's Thursday off become Ana off on Tuesday and Ben at Oceanside on Thursday.
+     * Drag and drop between any two days on the schedule: the two days trade places. One person can move their own day
+     * off within the week (Ana's Tuesday at Oceanside and her Thursday off become Tuesday off and Thursday at
+     * Oceanside); between two people, only work days trade, because nobody is put to work on a day they are off.
      * With {@code storeId} the dragged work day lands at that store instead (a drop on a store's row).
      *
      * <p>A work day that lands on a date its store is closed goes to the person's home store if that is open, and is
@@ -285,6 +289,11 @@ public class ScheduleService {
         }
         DayType toType = to.getType();
         Store toStore = to.getStore();
+        if (!from.getEmployee().getId().equals(to.getEmployee().getId())) {
+            // Moving your own day off within your week is fine; handing a shift to someone on their day off is not.
+            requireNotPuttingOffPersonToWork(to, fromType);
+            requireNotPuttingOffPersonToWork(from, toType);
+        }
         Store newToStore = placeStore(schedule, to.getEmployee(), to.getWorkDate(), fromType, fromStore, storeId != null);
         Store newFromStore = placeStore(schedule, from.getEmployee(), from.getWorkDate(), toType, toStore, false);
 
@@ -412,6 +421,47 @@ public class ScheduleService {
             e.setManuallyEdited(true);
             e.setAutoAssigned(false);
         });
+        schedule.setUpdatedAt(Instant.now());
+        return toResponse(schedule);
+    }
+
+    /**
+     * "Save draft": a checkpoint on the way to publishing. Every change is stored as it is made; this marks the draft as
+     * saved up to here so the manager can stop and carry on later (and see whether anything changed since).
+     */
+    @Transactional
+    public ScheduleResponse saveDraft(Long scheduleId) {
+        WeeklySchedule schedule = getManaged(scheduleId);
+        requireDraft(schedule);
+        ensureApprovedDaysOff(schedule);
+        schedule.markDraftSaved();
+        return toResponse(schedule);
+    }
+
+    /**
+     * "Add people where needed": sends someone who is working that day to a store that is short. Only people who work
+     * that day can be added; anyone who is off (a regular day off or an approved request) is refused, so nobody is put
+     * to work on a day off.
+     */
+    @Transactional
+    public ScheduleResponse addToStore(Long scheduleId, Long entryId, Long storeId) {
+        WeeklySchedule schedule = getManaged(scheduleId);
+        requireDraft(schedule);
+        ScheduleEntry entry = entry(schedule, entryId);
+        Employee person = entry.getEmployee();
+        if (entry.getType() != DayType.WORK || hasApprovedDayOff(person, entry.getWorkDate())) {
+            throw new BusinessRuleException(person.getFirstName() + " is off on " + dayName(entry.getWorkDate())
+                    + ", so they can't be added to work that day.");
+        }
+        Store store = storeService.requireAssignable(storeId, schedule.getArea().getId());
+        requireOpen(store, entry.getWorkDate());
+        if (entry.getStore() != null && entry.getStore().getId().equals(store.getId())) {
+            throw new BusinessRuleException(person.getFirstName() + " already works at " + store.getName() + " on "
+                    + dayName(entry.getWorkDate()) + ".");
+        }
+        entry.setStore(store);
+        entry.setManuallyEdited(true);
+        entry.setAutoAssigned(false);
         schedule.setUpdatedAt(Instant.now());
         return toResponse(schedule);
     }
@@ -684,6 +734,18 @@ public class ScheduleService {
         return new DayOffImpact(requestId, employee.getFullName(), date, level, summary, workingBefore, workingAfter,
                 needed, backToWork, schedule.map(WeeklySchedule::getStatus).orElse(null), alreadyOff, alsoRequested,
                 sameStoreOff, request.isEmergency(), newShortages, was.gaps().size());
+    }
+
+    /**
+     * Someone who is off that day (a regular day off or an approved request) can't be handed a work day by a swap with
+     * another person. To bring them back, the manager changes their own day back to Work.
+     */
+    private static void requireNotPuttingOffPersonToWork(ScheduleEntry entry, DayType newType) {
+        if (entry.getType() != DayType.WORK && newType == DayType.WORK) {
+            throw new BusinessRuleException(entry.getEmployee().getFirstName() + " is off on "
+                    + dayName(entry.getWorkDate()) + ", so they can't be assigned to work that day. Swaps between "
+                    + "two people only trade stores when both are working.");
+        }
     }
 
     private boolean hasApprovedDayOff(Employee employee, LocalDate date) {
@@ -1074,6 +1136,8 @@ public class ScheduleService {
                 schedule.getStatus(),
                 schedule.getPublishedAt(),
                 schedule.getUpdatedAt(),
+                schedule.getDraftSavedAt(),
+                schedule.isChangedSinceSave(),
                 dates,
                 dates.stream().map(d -> headCount.getOrDefault(d, 0)).toList(),
                 pending,

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.schedulingsoftware.schedule.ScheduleDtos.AddToStoreRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.GenerateScheduleRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.MoveForWeekRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.ScheduleResponse;
@@ -56,7 +57,6 @@ public class ScheduleController {
         return scheduleService.swap(scheduleId, request.entryIdA(), request.entryIdB());
     }
 
-    /** Re-runs automatic store assignment, keeping days set by hand. */
     /** Drag and drop: two days trade places, any person and any day (optionally landing at a store). */
     @PostMapping("/{scheduleId}/exchange")
     public ScheduleResponse exchange(@PathVariable Long scheduleId, @Valid @RequestBody ExchangeRequest request) {
@@ -69,6 +69,7 @@ public class ScheduleController {
         return scheduleService.swapDays(scheduleId, request.entryIdA(), request.entryIdB());
     }
 
+    /** Re-runs automatic store assignment, keeping days set by hand. */
     @PostMapping("/{scheduleId}/auto-assign-stores")
     public ScheduleResponse autoAssignStores(@PathVariable Long scheduleId) {
         return scheduleService.autoAssignStores(scheduleId);
@@ -77,6 +78,18 @@ public class ScheduleController {
     @PostMapping("/{scheduleId}/move-for-week")
     public ScheduleResponse moveForWeek(@PathVariable Long scheduleId, @Valid @RequestBody MoveForWeekRequest request) {
         return scheduleService.moveForWeek(scheduleId, request.employeeId(), request.storeId());
+    }
+
+    /** "Save draft": marks everything up to now as saved, so the manager can carry on later from here. */
+    @PostMapping("/{scheduleId}/save-draft")
+    public ScheduleResponse saveDraft(@PathVariable Long scheduleId) {
+        return scheduleService.saveDraft(scheduleId);
+    }
+
+    /** "Add people where needed": move someone who works that day to a store that is short. */
+    @PostMapping("/{scheduleId}/add-to-store")
+    public ScheduleResponse addToStore(@PathVariable Long scheduleId, @Valid @RequestBody AddToStoreRequest request) {
+        return scheduleService.addToStore(scheduleId, request.entryId(), request.storeId());
     }
 
     @PostMapping("/{scheduleId}/publish")

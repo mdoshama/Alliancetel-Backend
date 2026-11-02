@@ -1,6 +1,8 @@
 package com.example.schedulingsoftware.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,6 +30,7 @@ import com.example.schedulingsoftware.schedule.DayType;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.DayCell;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.EmployeeRow;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.ScheduleResponse;
+import com.example.schedulingsoftware.schedule.ScheduleStatus;
 import com.example.schedulingsoftware.schedule.ScheduleService;
 import com.example.schedulingsoftware.store.StoreDtos.DayHours;
 import com.example.schedulingsoftware.store.StoreDtos.StoreRequest;
@@ -208,18 +211,21 @@ class StoreRotationIntegrationTest {
     }
 
     @Test
-    void swapWithSomeoneOffHandsOverTheShift() {
+    void swapNeverPutsSomeoneWhoIsOffToWork() {
         ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ana, 2);
         DayCell anaOff = row(s, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         int day = row(s, ana).days().indexOf(anaOff);
         DayCell benSameDay = row(s, ben).days().get(day);
         if (benSameDay.type() != DayType.WORK) {
-            return; // Both off the same day in this layout; nothing to hand over.
+            return; // Both off the same day in this layout; nothing to swap.
         }
-        ScheduleResponse after = scheduleService.swap(s.id(), anaOff.entryId(), benSameDay.entryId());
-        assertEquals(DayType.WORK, row(after, ana).days().get(day).type());
-        assertEquals(chulaVista, row(after, ana).days().get(day).storeId());
-        assertEquals(DayType.OFF, row(after, ben).days().get(day).type());
+        assertThrows(BusinessRuleException.class,
+                () -> scheduleService.swap(s.id(), anaOff.entryId(), benSameDay.entryId()));
+        assertThrows(BusinessRuleException.class,
+                () -> scheduleService.exchange(s.id(), benSameDay.entryId(), anaOff.entryId(), null));
+        ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
+        assertEquals(DayType.OFF, row(after, ana).days().get(day).type(), "Ana stays off");
+        assertEquals(DayType.WORK, row(after, ben).days().get(day).type());
     }
 
     @Test
@@ -321,14 +327,19 @@ class StoreRotationIntegrationTest {
     void anyTwoDaysCanTradePlaces() {
         ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ben, 3);
         // Ana's first work day and Ben's day off on a different date.
+        // Between two people, a work day can't land on someone's day off.
         DayCell benOff = row(s, ben).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         DayCell anaWork = row(s, ana).days().stream()
                 .filter(c -> c.type() == DayType.WORK && !c.date().equals(benOff.date())).findFirst().orElseThrow();
-        ScheduleResponse x = scheduleService.exchange(s.id(), anaWork.entryId(), benOff.entryId(), null);
-        assertEquals(DayType.OFF, cell(x, ana, anaWork.entryId()).type(), "Ana now has that day off");
-        assertNull(cell(x, ana, anaWork.entryId()).storeId());
-        assertEquals(DayType.WORK, cell(x, ben, benOff.entryId()).type(), "Ben works the other day");
-        assertEquals(anaWork.storeId(), cell(x, ben, benOff.entryId()).storeId(), "at Ana's store");
+        assertThrows(BusinessRuleException.class,
+                () -> scheduleService.exchange(s.id(), anaWork.entryId(), benOff.entryId(), null));
+
+        // Ben can still move his own day off to another day of his week.
+        DayCell benWork = row(s, ben).days().stream()
+                .filter(c -> c.type() == DayType.WORK && !c.date().equals(benOff.date())).findFirst().orElseThrow();
+        ScheduleResponse x = scheduleService.exchange(s.id(), benWork.entryId(), benOff.entryId(), null);
+        assertEquals(DayType.OFF, cell(x, ben, benWork.entryId()).type(), "Ben's day off moved");
+        assertEquals(DayType.WORK, cell(x, ben, benOff.entryId()).type(), "and he works the old day");
 
         // Dropping on a store's row on another day: the shift moves to that day and store.
         DayCell anaWork2 = row(x, ana).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
@@ -342,8 +353,8 @@ class StoreRotationIntegrationTest {
         assertEquals(chulaVista, cell(z, ana, anaWork2.entryId()).storeId());
 
         // A day off can't be dropped on a store.
-        DayCell anaOff = row(z, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
-        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), anaOff.entryId(), anaOff.entryId(), oceanside));
+        DayCell benOffNow = row(z, ben).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
+        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), benOffNow.entryId(), benOffNow.entryId(), oceanside));
     }
 
     @Test
@@ -367,6 +378,46 @@ class StoreRotationIntegrationTest {
         DayCell benWork = row(after, ben).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
         assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), benWork.entryId(), anaThuOff.entryId(), null),
                 "approved day off can't be moved");
+    }
+
+    @Test
+    void saveDraftMarksACheckpointAndLaterChangesShowAsUnsaved() {
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        assertTrue(s.changedSinceSave(), "a new draft has not been saved yet");
+        assertNull(s.draftSavedAt());
+
+        ScheduleResponse saved = scheduleService.saveDraft(s.id());
+        assertNotNull(saved.draftSavedAt());
+        assertFalse(saved.changedSinceSave(), saved.draftSavedAt() + " vs " + saved.updatedAt());
+        assertEquals(ScheduleStatus.DRAFT, saved.status(), "saving keeps it a draft");
+
+        ScheduleResponse edited = dayOff(saved, ana, 4);
+        assertTrue(edited.changedSinceSave(), "a change after the save is flagged");
+
+        ScheduleResponse rebuilt = scheduleService.generate(area, monday);
+        assertNull(rebuilt.draftSavedAt(), "regenerating starts over");
+    }
+
+    @Test
+    void addPeopleWhereNeededMovesSomeoneWhoWorksButNeverSomeoneWhoIsOff() {
+        ScheduleResponse generated = scheduleService.generate(area, monday);
+        // Chula Vista now needs 2 but only has Ben: a gap to fill by hand.
+        storeService.update(chulaVista, new StoreRequest(area, "Chula Vista", "CHV", null, 2, true, null, null));
+        ScheduleResponse s = dayOff(scheduleService.saveDraft(generated.id()), ana, 1);
+        DayCell anaOff = row(s, ana).days().get(1);
+        assertEquals(DayType.OFF, anaOff.type());
+        assertThrows(BusinessRuleException.class, () -> scheduleService.addToStore(s.id(), anaOff.entryId(), chulaVista),
+                "Ana is off that day");
+
+        DayCell anaWorks = row(s, ana).days().get(2);
+        assertEquals(DayType.WORK, anaWorks.type());
+        ScheduleResponse after = scheduleService.addToStore(s.id(), anaWorks.entryId(), chulaVista);
+        DayCell moved = row(after, ana).days().get(2);
+        assertEquals(DayType.WORK, moved.type());
+        assertEquals(chulaVista, moved.storeId());
+        assertTrue(moved.manuallyEdited(), "kept when stores are auto-filled again");
+        assertThrows(BusinessRuleException.class, () -> scheduleService.addToStore(s.id(), anaWorks.entryId(), chulaVista),
+                "already there");
     }
 
     @Test

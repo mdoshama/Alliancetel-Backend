@@ -34,6 +34,13 @@ public final class ScheduleDtos {
     public record SwapRequest(@NotNull Long entryIdA, @NotNull Long entryIdB) {
     }
 
+    /**
+     * "Add people where needed": put someone who already works that day at a short store. People who are off that day
+     * are refused.
+     */
+    public record AddToStoreRequest(@NotNull Long entryId, @NotNull Long storeId) {
+    }
+
     /** Send someone to a store for every day they work this week. */
     public record MoveForWeekRequest(@NotNull Long employeeId, @NotNull Long storeId) {
     }
@@ -164,6 +171,10 @@ public final class ScheduleDtos {
             ScheduleStatus status,
             Instant publishedAt,
             Instant updatedAt,
+            /** Last "Save draft" checkpoint; null if the draft was never saved. */
+            Instant draftSavedAt,
+            /** The draft changed after its last save (always true before the first save). */
+            boolean changedSinceSave,
             List<LocalDate> dates,
             List<Integer> dailyHeadCount,
             long pendingDayOffRequests,
