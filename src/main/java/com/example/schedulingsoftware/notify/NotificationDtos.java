@@ -39,7 +39,11 @@ public final class NotificationDtos {
     public record WhatsAppStatus(boolean connected, String apiVersion, String language, boolean appUrlSet,
             List<TemplateInfo> templates, long queued, long failed, long notSent, long withoutPhone, long notAgreed,
             /** Email: connected, the sender address, and how many people turned email off. */
-            boolean emailConnected, String emailFrom, long emailOff) {
+            boolean emailConnected, String emailFrom, long emailOff,
+            /** Text messages: connected, who they come from, and people with a phone who haven't agreed yet. */
+            boolean smsConnected, String smsFrom, long smsNotAgreed,
+            /** WhatsApp through "meta" or "twilio", and the Twilio Sandbox number and join phrase, if used. */
+            String whatsappProvider, String sandboxNumber, String sandboxJoin) {
     }
 
     public record AnnounceRequest(

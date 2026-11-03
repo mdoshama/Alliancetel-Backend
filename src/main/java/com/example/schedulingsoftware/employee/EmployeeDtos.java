@@ -71,7 +71,9 @@ public final class EmployeeDtos {
             boolean loginEnabled,
             Instant lastLoginAt,
             boolean whatsappOptIn,
-            boolean emailOptIn) {
+            boolean emailOptIn,
+            /** Agreed to text messages (only they can turn it on). */
+            boolean smsOptIn) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -93,7 +95,8 @@ public final class EmployeeDtos {
                     e.getPasswordHash() != null,
                     e.getLastLoginAt(),
                     e.isWhatsappOptIn(),
-                    e.isEmailOptIn());
+                    e.isEmailOptIn(),
+                    e.isSmsOptIn());
         }
     }
 

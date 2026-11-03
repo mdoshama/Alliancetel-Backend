@@ -233,7 +233,12 @@ public class EmployeeService {
         employee.setFirstName(InputRules.clean(request.firstName()));
         employee.setLastName(InputRules.clean(request.lastName()));
         employee.setEmail(email);
-        employee.setPhone(PhoneNumbers.normalize(request.phone()));
+        String phone = PhoneNumbers.normalize(request.phone());
+        if (!java.util.Objects.equals(phone, employee.getPhone())) {
+            // Agreement to texts is for a number: a new number needs the person to agree again.
+            employee.setSmsOptIn(false);
+        }
+        employee.setPhone(phone);
         employee.setRole(request.role());
         employee.setArea(request.areaId() == null ? null : areaService.getArea(request.areaId()));
         employee.setHomeStore(request.homeStoreId() == null ? null

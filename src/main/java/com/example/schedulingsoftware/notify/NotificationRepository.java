@@ -29,4 +29,6 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     long countByAreaIdAndStatus(Long areaId, NotificationStatus status);
 
     long countByStatus(NotificationStatus status);
+
+    java.util.Optional<Notification> findFirstByProviderMessageId(String providerMessageId);
 }

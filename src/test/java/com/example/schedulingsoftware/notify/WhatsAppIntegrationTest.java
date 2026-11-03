@@ -41,6 +41,8 @@ import com.example.schedulingsoftware.support.TestUsers;
         "alliancetel.whatsapp.access-token=TEST", "alliancetel.whatsapp.api-base-url=http://127.0.0.1:9" })
 class WhatsAppIntegrationTest {
 
+    static final SmsSettings SMS_OFF = new SmsSettings(false, "", "", "", "", "https://api.twilio.com");
+
     @Autowired
     AreaService areaService;
     @Autowired
@@ -220,7 +222,7 @@ class WhatsAppIntegrationTest {
         // Not connected: queued messages are recorded as not sent.
         WhatsAppSettings off = new WhatsAppSettings(false, "", "", "v22.0", "en_US", "", "a", "b", "c", "d", "https://graph.facebook.com");
         // 2 WhatsApp (Ana, Dev) + 4 emails, all recorded as not sent.
-        assertEquals(6, new WhatsAppDispatcher(notifications, off, (to, t, l, p) -> null, mailOff, noMail).dispatch());
+        assertEquals(6, new WhatsAppDispatcher(notifications, off, (to, t, l, p) -> null, mailOff, noMail, SMS_OFF, (to, text) -> null).dispatch());
         assertTrue(sentTo(ana).getFirst().getError().contains("isn't connected"));
 
         // Connected: Ana's goes through; Dev's hits a temporary problem, then a permanent one.
@@ -231,7 +233,7 @@ class WhatsAppIntegrationTest {
             return to.startsWith("+977") ? new SendResult(false, null, "Rate limited", sent.size() < 3)
                     : new SendResult(true, "wamid.1", null, false);
         };
-        WhatsAppDispatcher dispatcher = new WhatsAppDispatcher(notifications, connected, fake, mailOff, noMail);
+        WhatsAppDispatcher dispatcher = new WhatsAppDispatcher(notifications, connected, fake, mailOff, noMail, SMS_OFF, (to, text) -> null);
         dispatcher.dispatch();
         assertEquals(NotificationStatus.SENT, sentTo(ana).getFirst().getStatus());
         assertEquals("wamid.1", sentTo(ana).getFirst().getProviderMessageId());

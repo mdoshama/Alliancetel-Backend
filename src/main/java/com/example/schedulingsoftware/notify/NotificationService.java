@@ -26,7 +26,7 @@ import com.example.schedulingsoftware.notify.NotificationDtos.WhatsAppStatus;
 
 import lombok.RequiredArgsConstructor;
 
-/** The Messages page: what was sent to whom (email and WhatsApp), announcements, and trying a message again. */
+/** The Messages page: what was sent to whom (email, WhatsApp and text), announcements, and trying a message again. */
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
@@ -38,6 +38,7 @@ public class NotificationService {
     private final WhatsAppSettings settings;
     private final ScheduleNotifier notifier;
     private final EmailSettings emailSettings;
+    private final SmsSettings smsSettings;
 
     @Transactional(readOnly = true)
     public PageResponse<NotificationResponse> page(Long requestedAreaId, NotificationStatus status,
@@ -63,7 +64,12 @@ public class NotificationService {
                 !settings.getAppUrl().isEmpty(), templates, count(areaId, NotificationStatus.QUEUED),
                 count(areaId, NotificationStatus.FAILED), count(areaId, NotificationStatus.NOT_SENT), noPhone, notAgreed,
                 emailSettings.isConnected(), emailSettings.getFrom(),
-                people.stream().filter(e -> e.getRole() != Role.ADMIN && !e.isEmailOptIn()).count());
+                people.stream().filter(e -> e.getRole() != Role.ADMIN && !e.isEmailOptIn()).count(),
+                smsSettings.isConnected(), smsSettings.getSender(),
+                people.stream().filter(e -> e.getRole() != Role.ADMIN && e.getPhone() != null && !e.isSmsOptIn())
+                        .count(),
+                settings.isTwilio() ? "twilio" : "meta", settings.getSandboxNumber(),
+                settings.getSandboxNumber() == null ? null : settings.getTwilioSandboxJoin());
     }
 
     private long count(Long areaId, NotificationStatus status) {
@@ -84,10 +90,11 @@ public class NotificationService {
             throw new BusinessRuleException("There's nobody else in " + area.getName() + " to message.");
         }
         int n = notifier.announce(area, people, user.fullName(), InputRules.clean(message));
-        // Reachable: gets it by email, or by WhatsApp once that's connected.
+        // Reachable: gets it by email, or by WhatsApp or text once those are connected.
         int reachable = (int) people.stream()
                 .filter(e -> (e.getEmail() != null && e.isEmailOptIn())
-                        || (settings.isConnected() && e.getPhone() != null && e.isWhatsappOptIn()))
+                        || (settings.isConnected() && e.getPhone() != null && e.isWhatsappOptIn())
+                        || (smsSettings.isConnected() && e.getPhone() != null && e.isSmsOptIn()))
                 .count();
         return new AnnounceResult(n, reachable);
     }
@@ -110,6 +117,14 @@ public class NotificationService {
                 throw new BusinessRuleException(e.getFirstName() + " turned off email updates.");
             }
             n.setEmail(e.getEmail());
+        } else if (n.getChannel() == NotificationChannel.SMS) {
+            if (e.getPhone() == null) {
+                throw new BusinessRuleException("Add a phone number for " + e.getFirstName() + " first.");
+            }
+            if (!e.isSmsOptIn()) {
+                throw new BusinessRuleException(e.getFirstName() + " hasn't agreed to text messages yet.");
+            }
+            n.setPhone(e.getPhone());
         } else {
             if (e.getPhone() == null) {
                 throw new BusinessRuleException("Add a phone number for " + e.getFirstName() + " first.");

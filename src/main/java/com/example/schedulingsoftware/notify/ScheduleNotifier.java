@@ -46,9 +46,14 @@ public class ScheduleNotifier {
     private static final String NO_PHONE = "No phone number on file.";
     private static final String NO_CONSENT = "Hasn't agreed to WhatsApp messages yet.";
     private static final String EMAIL_OFF = "Turned off email updates.";
+    private static final String NO_SMS_CONSENT = "Hasn't agreed to text messages yet.";
+    /** One SMS part: Twilio bills each 160 characters, so every text is written to fit in one. */
+    static final int SMS_MAX = 160;
+    static final String SMS_STOP = "\nReply STOP to stop";
 
     private final NotificationRepository repository;
     private final WhatsAppSettings settings;
+    private final SmsSettings smsSettings;
 
     /**
      * Right after a week is published. The first time, everyone gets their whole week; when it is published again
@@ -167,8 +172,8 @@ public class ScheduleNotifier {
     }
 
     /**
-     * Queues the message on each channel: email (on by default; people can turn it off) and WhatsApp (only once it's
-     * connected, so the Messages page isn't full of WhatsApp messages that could never be sent).
+     * Queues the message on each channel: email (on by default; people can turn it off), and WhatsApp and text
+     * messages (each only once it's connected, so the Messages page isn't full of messages that could never be sent).
      */
     private void queue(Employee e, NotificationKind kind, List<String> rawParams, String subject, String text) {
         if (!e.isActive()) {
@@ -205,6 +210,57 @@ public class ScheduleNotifier {
             }
             repository.save(wa);
         }
+        if (smsSettings.isConnected()) {
+            Notification sms = base(e, kind, NotificationChannel.SMS);
+            sms.setPhone(e.getPhone());
+            sms.setTemplate("sms");
+            sms.setParamList(List.of());
+            sms.setBody(smsShort(kind, params));
+            sms.setPreview(sms.getBody());
+            if (e.getPhone() == null) {
+                sms.setStatus(NotificationStatus.NOT_SENT);
+                sms.setError(NO_PHONE);
+            } else if (!e.isSmsOptIn()) {
+                sms.setStatus(NotificationStatus.NOT_SENT);
+                sms.setError(NO_SMS_CONSENT);
+            }
+            repository.save(sms);
+        }
+    }
+
+    /**
+     * The short text-message version, one SMS part (160 characters) including the opt-out line: just what changed
+     * and the link; the full details are in the app, the email and WhatsApp.
+     */
+    static String smsShort(NotificationKind kind, List<String> p) {
+        String body = switch (kind) {
+            case WEEK_PUBLISHED -> "AllianceTel: Hi " + p.get(0) + ", your " + p.get(1) + " schedule is posted. " + smsLink(p.get(3));
+            case WEEK_CHANGED -> "AllianceTel: Hi " + p.get(0) + ", your " + p.get(1) + " schedule changed. " + smsLink(p.get(3));
+            case DAY_OFF_DECISION -> "AllianceTel: Hi " + p.get(0) + ", your day off " + p.get(1) + " was " + p.get(2)
+                    + ". " + p.get(3);
+            case ANNOUNCEMENT -> "AllianceTel " + p.get(1) + " (" + p.get(0) + "): " + p.get(2);
+        };
+        return fitSms(body);
+    }
+
+    private static String smsLink(String link) {
+        return link.startsWith("http") ? link : "See it in the AllianceTel app.";
+    }
+
+    /**
+     * Plain characters only (one dash or bullet outside the basic SMS alphabet makes each part hold 70 characters
+     * instead of 160), cut to one part with the opt-out line at the end.
+     */
+    static String fitSms(String text) {
+        String plain = text.replace('\u2013', '-').replace('\u2014', '-').replace("\u00b7", ",")
+                .replace("\u2022", "-").replace('\u2018', '\'').replace('\u2019', '\'').replace('\u201c', '"')
+                .replace('\u201d', '"').replace("\u2026", "...").replaceAll("\\s+", " ")
+                .replaceAll("[^\\x20-\\x7E]", "").trim();
+        int room = SMS_MAX - SMS_STOP.length();
+        if (plain.length() > room) {
+            plain = plain.substring(0, room - 3).trim() + "...";
+        }
+        return plain + SMS_STOP;
     }
 
     private static Notification base(Employee e, NotificationKind kind, NotificationChannel channel) {

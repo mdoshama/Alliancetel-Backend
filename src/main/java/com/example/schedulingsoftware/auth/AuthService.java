@@ -116,6 +116,17 @@ public class AuthService {
         return Me.from(e);
     }
 
+    /** Turns your own text-message updates on (needs a phone number on file) or off. */
+    @Transactional
+    public Me setSms(boolean optIn) {
+        Employee e = load(accessPolicy.current().id());
+        if (optIn && e.getPhone() == null) {
+            throw new BusinessRuleException("There's no phone number on file for you. Ask your manager to add it.");
+        }
+        e.setSmsOptIn(optIn);
+        return Me.from(e);
+    }
+
     @Transactional
     public Me setEmailUpdates(boolean optIn) {
         Employee e = load(accessPolicy.current().id());

@@ -13,7 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Sends queued messages (email and WhatsApp) every few seconds. A message that can't go out right now (network
+ * Sends queued messages (email, WhatsApp and text) every few seconds. A message that can't go out right now (network
  * trouble, rate limit) is tried again after 1, then 2 minutes; after 3 tries it is marked failed with the reason.
  * Emails carry an idempotency key, so the email service never delivers the same one twice. Run one copy of the
  * backend (as on Railway), or two copies could send the same WhatsApp message.
@@ -31,6 +31,8 @@ public class WhatsAppDispatcher {
     private final WhatsAppClient client;
     private final EmailSettings emailSettings;
     private final EmailClient emailClient;
+    private final SmsSettings smsSettings;
+    private final SmsClient smsClient;
 
     /**
      * Runs on a timer. The transaction must start here: a call from inside this class to {@link #dispatch()} would
@@ -47,17 +49,28 @@ public class WhatsAppDispatcher {
     public int dispatch() {
         List<Notification> due = repository.findDue(Instant.now(), PageRequest.of(0, BATCH));
         for (Notification n : due) {
-            boolean email = n.getChannel() == NotificationChannel.EMAIL;
-            if (email ? !emailSettings.isConnected() : !settings.isConnected()) {
+            NotificationChannel channel = n.getChannel();
+            boolean connected = switch (channel) {
+                case EMAIL -> emailSettings.isConnected();
+                case WHATSAPP -> settings.isConnected();
+                case SMS -> smsSettings.isConnected();
+            };
+            if (!connected) {
                 n.setStatus(NotificationStatus.NOT_SENT);
-                n.setError((email ? "Email" : "WhatsApp") + " isn't connected yet, so this message was only recorded.");
+                n.setError(switch (channel) {
+                    case EMAIL -> "Email";
+                    case WHATSAPP -> "WhatsApp";
+                    case SMS -> "Text messaging";
+                } + " isn't connected yet, so this message was only recorded.");
                 continue;
             }
             n.setAttempts(n.getAttempts() + 1);
-            SendResult result = email
-                    ? emailClient.send(n.getEmail(), n.getSubject(), n.getBody(), EmailHtml.render(n.getSubject(), n.getBody()),
-                            "alliancetel-notification-" + n.getId())
-                    : client.send(n.getPhone(), n.getTemplate(), settings.getLanguage(), n.paramList());
+            SendResult result = switch (channel) {
+                case EMAIL -> emailClient.send(n.getEmail(), n.getSubject(), n.getBody(),
+                        EmailHtml.render(n.getSubject(), n.getBody()), "alliancetel-notification-" + n.getId());
+                case WHATSAPP -> client.send(n.getPhone(), n.getTemplate(), settings.getLanguage(), n.paramList());
+                case SMS -> smsClient.send(n.getPhone(), n.getBody());
+            };
             if (result == null) {
                 result = SendResult.failed("No answer from the sender.", true);
             }

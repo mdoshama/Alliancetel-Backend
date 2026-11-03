@@ -1,4 +1,4 @@
-# AllianceTel Scheduling
+# AllianceTel Enterprise
 
 Weekly workforce scheduling for AllianceTel stores. Admins set up areas (San Diego, Los Angeles,
 San Francisco, …), their stores and staff. Managers build and publish each week's schedule, and
@@ -85,9 +85,10 @@ browser ──► frontend (nginx: Angular site, forwards /api) ──► backen
   are locked: they can't be turned into work or edited by hand, and opening or publishing a week re-checks that
   every approved day is off.
 
-### Email and WhatsApp messages
+### Email, WhatsApp and text messages
 
-Employees hear about their schedule by **email** (on by default) and, once it's connected, on **WhatsApp**:
+Employees hear about their schedule by **email** (on by default) and, once they're connected, on **WhatsApp** and
+by **text message (SMS)**:
 
 | When | Who gets a message | What it says |
 |---|---|---|
@@ -102,11 +103,18 @@ Employees hear about their schedule by **email** (on by default) and, once it's 
 - **WhatsApp** (Meta WhatsApp Cloud API) is optional and can be connected later. People must agree first (Meta's
   rule): a manager ticks "Agreed to get schedule updates on WhatsApp", or the person turns it on in their account
   menu. Until WhatsApp is connected, no WhatsApp messages are made.
+- **Text messages** go through [Twilio](https://www.twilio.com) and are optional too. Only the person can agree to
+  texts (US carrier rules): they switch on *By text message* in their account menu, which shows the consent wording.
+  A new phone number turns it off until they agree again. Texts use plain characters (so each part holds 160
+  characters) and each fits in one part (160 characters) ending with "Reply STOP to stop". Until texting is
+  connected, no text messages are made. WhatsApp can also go through Twilio (`WHATSAPP_PROVIDER=twilio`), including
+  its free Sandbox for testing.
 - Every message is saved with the change that caused it and sent within seconds by a background sender. Ones that
   can't go out right away are retried; emails carry a key so the same email is never delivered twice. The
   **Messages** page lists what went to whom (filter by channel), failures with the reason, and **Try again**.
 - Until email is connected, emails are only recorded there (status *Not sent*). How to connect email and
-  WhatsApp: [DEPLOYMENT.md](DEPLOYMENT.md#email-messages).
+  WhatsApp: [DEPLOYMENT.md](DEPLOYMENT.md#email-messages); text messages:
+  [DEPLOYMENT.md](DEPLOYMENT.md#text-messages-sms).
 
 ### Sign-in and security
 
@@ -207,6 +215,14 @@ Every setting can be given as an environment variable.
 | `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | empty | From Meta's WhatsApp Manager; see DEPLOYMENT.md. |
 | `WHATSAPP_API_VERSION` / `WHATSAPP_TEMPLATE_LANGUAGE` | `v22.0` / `en_US` | Meta Graph API version and template language. |
 | `WHATSAPP_TEMPLATE_WEEK_PUBLISHED`, `…_WEEK_CHANGED`, `…_DAY_OFF`, `…_ANNOUNCEMENT` | `schedule_published`, `schedule_changed`, `day_off_update`, `team_announcement` | Template names, if yours differ. |
+| `SMS_ENABLED` | `false` | Send text messages through Twilio (needs the SID, token and a sender below). |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | empty | From the Twilio Console home page. |
+| `TWILIO_MESSAGING_SERVICE_SID` | empty | The Messaging Service registered for A2P 10DLC (preferred sender). |
+| `TWILIO_FROM_NUMBER` | empty | Or a single Twilio number, e.g. `+16195550100`, if you don't use a Messaging Service. |
+| `WHATSAPP_PROVIDER` | `meta` | `twilio` sends WhatsApp through the Twilio account above instead of Meta's Cloud API. |
+| `TWILIO_WHATSAPP_FROM` | `whatsapp:+14155238886` | Twilio WhatsApp sender (default: the Sandbox). |
+| `TWILIO_WHATSAPP_SANDBOX_JOIN` | empty | Sandbox join phrase, e.g. `join happy-tiger`; shown to staff in their account menu. |
+| `TWILIO_WA_CONTENT_WEEK_PUBLISHED`, `…_WEEK_CHANGED`, `…_DAY_OFF`, `…_ANNOUNCEMENT` | empty | Approved Twilio Content template SIDs (`HX…`) for going live. |
 
 **Production mode** (`SPRING_PROFILES_ACTIVE=prod`, set automatically in Docker) refuses to start
 without a database, a strong `JWT_SECRET` and, on an empty database, a valid `ADMIN_PASSWORD`. It

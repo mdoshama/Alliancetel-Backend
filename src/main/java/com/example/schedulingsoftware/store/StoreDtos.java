@@ -1,5 +1,9 @@
 package com.example.schedulingsoftware.store;
 
+import java.math.BigDecimal;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import com.example.schedulingsoftware.common.InputRules;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
@@ -30,7 +34,15 @@ public final class StoreDtos {
             /** Opening hours for any weekdays being set; days left out use 10:00–20:00. Null keeps the current hours. */
             @Valid @Size(max = 7, message = "can list each weekday only once") List<DayHours> hours,
             /** Hex color like "#2563EB". Null keeps the current color (new stores get an unused palette color). */
-            @Pattern(regexp = "^#[0-9a-fA-F]{6}$", message = "must be a color like #2563EB") String color) {
+            @Pattern(regexp = "^#[0-9a-fA-F]{6}$", message = "must be a color like #2563EB") String color,
+            /** Sales tax in percent, e.g. 7.75. Null keeps the current rate (0 for a new store). */
+            @DecimalMin("0") @DecimalMax("30") @Digits(integer = 2, fraction = 3) BigDecimal taxRate) {
+
+        /** Without a tax rate (keeps the current one). */
+        public StoreRequest(Long areaId, String name, String code, String address, Integer minStaffPerDay,
+                Boolean active, List<DayHours> hours, String color) {
+            this(areaId, name, code, address, minStaffPerDay, active, hours, color, null);
+        }
     }
 
     /** One day's hours. When {@code closed} is true the times are ignored. */
@@ -58,12 +70,14 @@ public final class StoreDtos {
             boolean active,
             long employeeCount,
             List<DayHours> hours,
-            String color) {
+            String color,
+            /** Sales tax in percent. */
+            BigDecimal taxRate) {
 
         public static StoreResponse from(Store s, long employeeCount) {
             return new StoreResponse(s.getId(), s.getArea().getId(), s.getArea().getName(), s.getName(), s.getCode(),
                     s.getLabel(), s.getAddress(), s.getMinStaffPerDay(), s.isActive(), employeeCount,
-                    DayHours.weekOf(s), s.getDisplayColor());
+                    DayHours.weekOf(s), s.getDisplayColor(), s.getTaxRate());
         }
     }
 }

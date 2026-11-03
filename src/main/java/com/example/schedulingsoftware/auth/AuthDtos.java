@@ -37,7 +37,9 @@ public final class AuthDtos {
             /** Gets schedule updates on WhatsApp. */
             boolean whatsappOptIn,
             /** Gets schedule updates by email. */
-            boolean emailOptIn) {
+            boolean emailOptIn,
+            /** Gets schedule updates by text message. */
+            boolean smsOptIn) {
 
         public static Me from(Employee e) {
             return new Me(e.getId(), e.getEmployeeCode(), e.getFullName(), e.getEmail(), e.getRole(),
@@ -48,7 +50,8 @@ public final class AuthDtos {
                     e.isMustChangePassword(),
                     e.getPhone(),
                     e.isWhatsappOptIn(),
-                    e.isEmailOptIn());
+                    e.isEmailOptIn(),
+                    e.isSmsOptIn());
         }
     }
 

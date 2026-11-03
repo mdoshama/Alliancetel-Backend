@@ -58,6 +58,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/error").permitAll()
+                        // Twilio delivery reports: no sign-in, checked by Twilio's signature instead.
+                        .requestMatchers(HttpMethod.POST, "/api/webhooks/twilio/status").permitAll()
                         .requestMatchers("/api/auth/**").authenticated()
 
                         // Areas and employees are maintained by admins; managers can look at their own team.
@@ -76,6 +78,22 @@ public class SecurityConfig {
                                 .hasAnyRole(ADMIN, MANAGER)
                         .requestMatchers("/api/day-off-requests/**").authenticated()
                         .requestMatchers("/api/notifications/**").hasAnyRole(ADMIN, MANAGER)
+
+                        // Device list for logging sales: everyone reads it, admins keep it.
+                        .requestMatchers(HttpMethod.GET, "/api/catalog/**").authenticated()
+                        .requestMatchers("/api/catalog/**").hasRole(ADMIN)
+
+                        // Commission is for admins only.
+                        .requestMatchers("/api/commission/**").hasRole(ADMIN)
+
+                        // Performance: everyone sees their own; managers and admins see the leaderboard.
+                        .requestMatchers("/api/performance/leaderboard").hasAnyRole(ADMIN, MANAGER)
+                        .requestMatchers("/api/performance/**").authenticated()
+
+                        // End of day: reps log their own sales and close out; managers review, approve and reopen.
+                        .requestMatchers("/api/eod/*/approve", "/api/eod/*/reopen", "/api/eod/day", "/api/eod/month")
+                                .hasAnyRole(ADMIN, MANAGER)
+                        .requestMatchers("/api/eod/**").authenticated()
 
                         // Everyone can read a schedule (employees only once published); managers build them.
                         .requestMatchers(HttpMethod.GET, "/api/schedules/**").authenticated()

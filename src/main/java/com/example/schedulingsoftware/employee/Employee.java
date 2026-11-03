@@ -82,6 +82,14 @@ public class Employee {
     @ColumnDefault("false")
     private boolean whatsappOptIn;
 
+    /**
+     * Agreed to get schedule updates by text message (SMS). Only the person can turn it on (consent is required
+     * before texting), and it's turned off when their phone number changes.
+     */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    private boolean smsOptIn;
+
     /** Gets schedule updates by email (on unless they turn it off). */
     @Column(nullable = false)
     @ColumnDefault("true")

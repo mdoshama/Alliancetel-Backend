@@ -42,6 +42,12 @@ public class AuthController {
         return authService.setWhatsapp(body.optIn());
     }
 
+    /** Anyone can turn their own text-message updates on (if they have a phone number on file) or off. */
+    @PutMapping("/me/sms")
+    public Me sms(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {
+        return authService.setSms(body.optIn());
+    }
+
     /** Anyone can turn their own email schedule updates off or back on. */
     @PutMapping("/me/email")
     public Me email(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {

@@ -1,4 +1,4 @@
-# Deploying AllianceTel Scheduling
+# Deploying AllianceTel Enterprise
 
 The app has three parts:
 
@@ -122,6 +122,98 @@ Push to `main` in either repository and Railway redeploys that service; the old 
 working while the backend redeploys, because nginx looks up the backend's new address every 10 seconds.
 Take a manual backup (Postgres → Backups) before deploying anything that changes stored data.
 
+### Test on staging first (without touching the live database)
+
+A Railway **environment** is a full copy of the project (frontend, backend, database) with its own database, its
+own private network and its own variables. Changes in `staging` can't reach production's data.
+
+**1. Put the new code on a `staging` branch** (production keeps deploying from `main`, untouched):
+
+```bash
+cd ~/IdeaProjects/scheduling-software
+git checkout -b staging && git add -A && git commit -m "Enterprise 2.0" && git push -u origin staging
+cd ~/IdeaProjects/scheduling-software-frontend
+git checkout -b staging && git add -A && git commit -m "Enterprise 2.0" && git push -u origin staging
+```
+
+**2. Create the environment.** Railway → environment dropdown (top) → **+ New Environment** → name `staging` →
+**Duplicate Environment** (copies services and variables, not data). Before approving the staged changes, open each
+app service's **Settings → Source** and set the branch to `staging` (backend and frontend). Then **Deploy**.
+In the staging frontend, **Settings → Networking → Generate Domain** (a `…up.railway.app` address).
+
+**3. Staging variables (backend) — change these before testing**, because a copy of real data means real people:
+
+| Variable | Staging value | Why |
+|---|---|---|
+| `EMAIL_ENABLED` | `false` | Otherwise publishing a test schedule emails your real staff |
+| `SMS_ENABLED` | `false` (or a trial account, which only texts verified numbers) | Same, by text |
+| `WHATSAPP_ENABLED` / `WHATSAPP_PROVIDER` | `true` / `twilio` with the Sandbox | Only people who joined the Sandbox get anything |
+| `APP_URL` | the staging domain from step 2 | Links and Twilio delivery reports go to staging |
+| `JWT_SECRET` | a new value (`openssl rand -base64 48`) | Production sign-ins don't work on staging |
+
+**4. Copy production's data into staging (optional, read-only on production).** This tests the upgrade on your real
+data. On your Mac (`brew install libpq && brew link --force libpq` once), with each Postgres service's
+`DATABASE_PUBLIC_URL` (Postgres → Variables, in each environment):
+
+```bash
+pg_dump "<PRODUCTION DATABASE_PUBLIC_URL>" --format=custom --no-owner --file=prod-$(date +%Y%m%d-%H%M).dump
+pg_restore --no-owner --clean --if-exists --dbname="<STAGING DATABASE_PUBLIC_URL>" prod-*.dump
+```
+
+`pg_dump` only reads production (and the file doubles as a backup). Then **redeploy the staging backend**: on
+start it upgrades the copied tables exactly as production will (new tables, `stores.tax_rate`, the
+`notifications` channel check: look for *Updated notifications_channel_check* in the logs). Sign in with your
+normal production accounts.
+
+**5. Test on the staging site** (checklist):
+- Existing data: weekly schedules, day-off requests, employees, areas, stores all there; download/share PDF works.
+- Dashboard; Stores (set a tax %); Devices (add a brand and device).
+- End of Day as an employee: add a sale (QPAY + subtotal), an accessory, split with a partner, *Add $X over as
+  accessories*, Clear, submit; as a manager approve, reopen, approve.
+- Performance (team and one employee); Commission (approved EODs show; plan settings save; finalize a month).
+- Messages: account menu shows the Sandbox join phrase; send the phrase from your WhatsApp, turn on WhatsApp, send
+  an announcement, see it arrive and turn *Sent*; a person who didn't join shows *Failed* with the reason.
+- Phone check: open the staging site on your phone.
+
+**6. Go live:** back up production (Postgres → Backups → *Create backup*, plus a `pg_dump` as above), then merge:
+
+```bash
+cd ~/IdeaProjects/scheduling-software && git checkout main && git merge staging && git push
+cd ~/IdeaProjects/scheduling-software-frontend && git checkout main && git merge staging && git push
+```
+
+Production redeploys from `main` and upgrades its database on start, as staging did. Keep `staging` for the next
+feature: push there first, test, then merge.
+
+### Upgrading the live scheduling app to Enterprise 2.0
+
+Version 2.0 adds End of Day, the device list, performance and commission to the scheduling app that's already live.
+Everything that exists today stays as it is: schedules, day-off requests, staff, areas, stores and messages.
+
+What happens to the database when the new backend starts:
+
+- New tables are created: `eod_reports`, `eod_lines`, `eod_line_shares`, `eod_accessory_shares`, `brands`, `devices`,
+  `commission_plan`, `commission_periods`, `commission_payouts`, `commission_adjustments`.
+- One column is added to `stores`: `tax_rate` (starts at 0 for every store).
+- Nothing is renamed or removed. This was tested by starting the current live version on PostgreSQL, adding a
+  published schedule and day-off requests, then starting 2.0 on the same database: all data was kept.
+- Startup logs may show a few `constraint "uk_..." does not exist, skipping` warnings the first time. They're
+  harmless notices from creating the new tables.
+
+Steps:
+
+1. **Back up first:** Postgres → Backups → *Create backup*.
+2. Commit and push both repositories to `main` (backend first, then frontend). Railway redeploys each service.
+3. Wait for both services to show *Active* (health check passed), then sign in as admin.
+4. Set up the new features once:
+   - **Stores:** set each store's sales tax % (used only to take tax off accessories for commission).
+   - **Devices:** add brands and devices with their retail prices (optional; reps can also type what was sold).
+   - **Commission → Plan settings:** check the rates and the accessory cost %.
+5. Tell managers that EODs only count for commission once they **approve** them.
+
+If something goes wrong, redeploy the previous commit in Railway (Deployments → ⋯ → *Redeploy*). The old version
+ignores the new tables and column, so it runs on the upgraded database without a restore.
+
 ### Railway troubleshooting
 
 | Symptom | Check |
@@ -211,6 +303,87 @@ Good to know:
   language doesn't match an approved template) or *Receiver is incapable of receiving this message* (that number
   isn't on WhatsApp). Fix it, then **Try again**.
 - Run a single backend instance (the Railway default), so each message is sent once.
+
+### WhatsApp through Twilio (and its free Sandbox for testing)
+
+Instead of setting up Meta's Cloud API (above), WhatsApp can go through the same Twilio account as text messages.
+For testing, use Twilio's **WhatsApp Sandbox**: no Meta Business account, approval or templates needed.
+
+1. Twilio Console → *Messaging → Try it out → Send a WhatsApp message*. Accept the Sandbox terms. Note the
+   **Sandbox number** (+1 415 523 8886) and your **join phrase**, e.g. `join happy-tiger`.
+2. *Sandbox settings* (same page): in **Status callback URL**, enter `https://<your site>/api/webhooks/twilio/status`
+   (optional; the app sets it on each message anyway).
+3. **Railway → backend → Variables:**
+
+   | Variable | Value |
+   |---|---|
+   | `WHATSAPP_ENABLED` | `true` |
+   | `WHATSAPP_PROVIDER` | `twilio` |
+   | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | from the Twilio Console home page |
+   | `TWILIO_WHATSAPP_FROM` | `whatsapp:+14155238886` (the Sandbox; this is the default) |
+   | `TWILIO_WHATSAPP_SANDBOX_JOIN` | your join phrase, e.g. `join happy-tiger` |
+   | `APP_URL` | your site, e.g. `https://atdirect.app` (links, and Twilio's delivery reports) |
+
+4. **Each person** opens their account menu: it shows *"First, on WhatsApp send join happy-tiger to (415) 523-8886"*
+   with an *Open WhatsApp* button. Then they switch on *On WhatsApp*.
+
+Sandbox limits (fine for testing and demos, not for everyday use):
+- Messages only reach people for **24 hours** after they last messaged the Sandbox (joining counts). After that,
+  a message fails with *Outside WhatsApp's 24-hour window (63016)* until they send any message to the Sandbox again.
+- **Trial accounts** can send about 50 WhatsApp messages a day; messages use the trial credit.
+- Everyone sees the Sandbox's name, not AllianceTel.
+
+**Going live on Twilio WhatsApp:** upgrade the Twilio account, register a WhatsApp sender (*Messaging → Senders →
+WhatsApp senders*, connects your Meta business), create four **Content templates** (category *Utility*) with the same
+text as the table under "WhatsApp messages" above, and once approved put their SIDs (`HX…`) in
+`TWILIO_WA_CONTENT_WEEK_PUBLISHED`, `TWILIO_WA_CONTENT_WEEK_CHANGED`, `TWILIO_WA_CONTENT_DAY_OFF` and
+`TWILIO_WA_CONTENT_ANNOUNCEMENT`, set `TWILIO_WHATSAPP_FROM` to your sender, and clear `TWILIO_WHATSAPP_SANDBOX_JOIN`.
+Templates reach people any time, without the 24-hour window.
+
+Delivery reports: Twilio tells the app a few seconds after sending whether each text or WhatsApp message was
+delivered. Failures show on the Messages page with the reason, e.g. *They haven't joined the WhatsApp Sandbox yet*.
+Reports are only accepted when signed with your auth token.
+
+### Text messages (SMS)
+
+Optional, alongside email and WhatsApp. The app texts schedule updates through **Twilio**. Until these steps are
+done, no text messages are made; email keeps working.
+
+1. **Twilio account.** Sign up at [twilio.com](https://www.twilio.com), upgrade from the trial (trial accounts can
+   only text verified numbers), and copy the **Account SID** and **Auth Token** from the Console home page.
+2. **A number to text from.** *Phone Numbers → Buy a number*, with SMS capability (a local 619/760 number works).
+3. **US registration (required).** US carriers block texts from unregistered business numbers. In Twilio go to
+   *Messaging → Regulatory Compliance → A2P 10DLC*: register your **brand** (AllianceTel's business details and
+   EIN), then a **campaign** of type *Account notifications* / *Low volume mixed*, describing: "Schedule updates
+   to our own employees, who opt in from their account menu in the AllianceTel app. Opt-in text: *Schedule texts
+   from AllianceTel. Msg & data rates may apply. Reply STOP to stop, HELP for help.*" Sample message: `Hi Ana, your
+   AllianceTel schedule for Nov 9-15 is posted: Mon 11/9 Oceanside 10am-8pm, ... Reply STOP to opt out.`
+   Twilio creates a **Messaging Service** for the campaign; add your number to it. Approval can take a few days.
+   (A toll-free number with *toll-free verification* is the alternative.)
+4. **Railway → backend service → Variables**, add:
+
+   | Variable | Value |
+   |---|---|
+   | `SMS_ENABLED` | `true` |
+   | `TWILIO_ACCOUNT_SID` | from step 1 (starts with `AC`) |
+   | `TWILIO_AUTH_TOKEN` | from step 1 |
+   | `TWILIO_MESSAGING_SERVICE_SID` | the Messaging Service from step 3 (starts with `MG`), or instead… |
+   | `TWILIO_FROM_NUMBER` | …the number from step 2, e.g. `+16195550100` |
+   | `APP_URL` | your site, for the link in schedule texts |
+
+   The backend restarts. The Messages page shows *Text connected*.
+5. **Agreement.** Each person adds a mobile number (via their manager) and switches on *By text message* in their
+   account menu (top right). Managers can't switch it on for them. Publish a week and watch the Messages page
+   (filter *Text message*): texts turn *Sent* within a few seconds.
+
+Good to know:
+- Twilio charges per message part (160 characters). Every text the app sends is written to fit in **one part**:
+  e.g. `AllianceTel: Hi Ana, your Nov 9-15 schedule is posted. https://atdirect.app/schedules?week=2026-11-09` plus
+  `Reply STOP to stop`. The full details are in the app, the email and WhatsApp. See Twilio's SMS pricing page.
+- Twilio handles **STOP**, **HELP** and **START** replies itself; someone who replied STOP isn't texted again, and the
+  Messages page shows Twilio's reason, e.g. *Attempt to send to unsubscribed recipient (21610)*.
+- Upgrading an existing database: on startup the backend widens the `notifications` table's allowed channels to
+  include `SMS` (log line *Updated notifications_channel_check*). Older versions keep working with it.
 
 ---
 

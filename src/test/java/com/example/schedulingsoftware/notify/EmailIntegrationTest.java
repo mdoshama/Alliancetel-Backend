@@ -33,6 +33,8 @@ import com.example.schedulingsoftware.support.TestUsers;
 @Transactional
 class EmailIntegrationTest {
 
+    static final SmsSettings SMS_OFF = new SmsSettings(false, "", "", "", "", "https://api.twilio.com");
+
     @Autowired
     AreaService areaService;
     @Autowired
@@ -132,7 +134,7 @@ class EmailIntegrationTest {
                 "https://api.resend.com");
         WhatsAppSettings waOff = new WhatsAppSettings(false, "", "", "v22.0", "en_US", "", "a", "b", "c", "d",
                 "https://graph.facebook.com");
-        new WhatsAppDispatcher(notifications, waOff, (t, a, b, c) -> null, mailOn, fake).dispatch();
+        new WhatsAppDispatcher(notifications, waOff, (t, a, b, c) -> null, mailOn, fake, SMS_OFF, (to, text) -> null).dispatch();
 
         assertEquals(NotificationStatus.SENT, mail.getStatus());
         assertEquals("re_123", mail.getProviderMessageId());

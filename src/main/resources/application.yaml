@@ -76,6 +76,18 @@ alliancetel:
     enabled: ${WHATSAPP_ENABLED:false}
     phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
     access-token: ${WHATSAPP_ACCESS_TOKEN:}
+    # meta (WhatsApp Cloud API, the settings above) or twilio (uses the Twilio account below, TWILIO_ACCOUNT_SID and
+    # TWILIO_AUTH_TOKEN). With Twilio's WhatsApp Sandbox, each person first sends the join phrase to the Sandbox number.
+    provider: ${WHATSAPP_PROVIDER:meta}
+    twilio:
+      from: ${TWILIO_WHATSAPP_FROM:whatsapp:+14155238886}
+      sandbox-join: ${TWILIO_WHATSAPP_SANDBOX_JOIN:}
+      # Approved Twilio Content templates (HX…), needed to message people outside WhatsApp's 24-hour window.
+      content:
+        week-published: ${TWILIO_WA_CONTENT_WEEK_PUBLISHED:}
+        week-changed: ${TWILIO_WA_CONTENT_WEEK_CHANGED:}
+        day-off: ${TWILIO_WA_CONTENT_DAY_OFF:}
+        announcement: ${TWILIO_WA_CONTENT_ANNOUNCEMENT:}
     api-version: ${WHATSAPP_API_VERSION:v22.0}
     language: ${WHATSAPP_TEMPLATE_LANGUAGE:en_US}
     template:
@@ -83,6 +95,16 @@ alliancetel:
       week-changed: ${WHATSAPP_TEMPLATE_WEEK_CHANGED:schedule_changed}
       day-off: ${WHATSAPP_TEMPLATE_DAY_OFF:day_off_update}
       announcement: ${WHATSAPP_TEMPLATE_ANNOUNCEMENT:team_announcement}
+  # Text messages (SMS) through Twilio. Until enabled with an account SID, auth token and a sender (a Twilio number or a
+  # Messaging Service), texts are only recorded on the Messages page. People must agree to texts themselves (user menu).
+  # US numbers need A2P 10DLC (or toll-free) registration in Twilio first. See README, "Text messages".
+  sms:
+    enabled: ${SMS_ENABLED:false}
+    twilio:
+      account-sid: ${TWILIO_ACCOUNT_SID:}
+      auth-token: ${TWILIO_AUTH_TOKEN:}
+      from-number: ${TWILIO_FROM_NUMBER:}
+      messaging-service-sid: ${TWILIO_MESSAGING_SERVICE_SID:}
   # Schedule emails through Resend's HTTPS API (Railway blocks SMTP mail on Free/Hobby plans). Until enabled with an
   # API key and a sender, emails are only recorded on the Messages page. See README, "Email and WhatsApp messages".
   email:
