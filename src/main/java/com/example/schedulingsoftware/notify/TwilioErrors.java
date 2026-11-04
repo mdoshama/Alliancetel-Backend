@@ -15,8 +15,9 @@ final class TwilioErrors {
             Map.entry("30007", "The carrier filtered it; finish A2P 10DLC registration in Twilio."),
             Map.entry("30034", "The sending number isn't registered for A2P 10DLC yet."),
             Map.entry("63015", "They haven't joined the WhatsApp Sandbox yet: they need to send the join phrase first."),
-            Map.entry("63016", "Outside WhatsApp's 24-hour window: they need to message the Sandbox again (any text), "
-                    + "or use an approved template."),
+            Map.entry("63016", "Outside WhatsApp's 24-hour window, so it needs an approved template: set the four "
+                    + "TWILIO_WA_CONTENT_ template IDs in Railway (on the Sandbox, the person can message it again to "
+                    + "reopen 24 hours), then Try again."),
             Map.entry("63003", "That number isn't on WhatsApp."),
             Map.entry("63024", "That number isn't on WhatsApp."),
             Map.entry("63112", "The WhatsApp sender isn't approved or is restricted by Meta."));
