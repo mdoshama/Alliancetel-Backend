@@ -20,9 +20,13 @@ import org.junit.jupiter.api.Test;
 class TwilioWhatsAppTest {
 
     private static WhatsAppSettings twilio(String join, String contentSid) {
+        return twilio("+14155238886", join, contentSid, "");
+    }
+
+    private static WhatsAppSettings twilio(String from, String join, String contentSid, String others) {
         return new WhatsAppSettings(true, "", "", "v22.0", "en_US", "https://atdirect.app", "schedule_published",
                 "schedule_changed", "day_off_update", "team_announcement", "https://graph.facebook.com", "twilio",
-                "+14155238886", join, "ACtest", "token", contentSid, "", "", "");
+                from, join, "ACtest", "token", contentSid, others, others, others);
     }
 
     @Test
@@ -33,7 +37,13 @@ class TwilioWhatsAppTest {
         assertEquals("whatsapp:+14155238886", s.getTwilioFrom());
         assertEquals("+14155238886", s.getSandboxNumber());
         assertEquals(NotificationKind.DAY_OFF_DECISION, s.kindOf("day_off_update"));
-        assertNull(twilio("", "").getSandboxNumber(), "not in the Sandbox");
+        assertTrue(twilio("", "").isSandbox(), "the default sender is the Sandbox, even without a join phrase");
+        WhatsAppSettings own = twilio("whatsapp:+16195550100", "join happy-tiger", "HX1", "HX2");
+        assertFalse(own.isSandbox(), "a registered number is not the Sandbox, even if the join phrase is left set");
+        assertNull(own.getSandboxNumber());
+        assertEquals("+16195550100", own.getSenderNumber());
+        assertTrue(own.hasAllContentTemplates());
+        assertFalse(twilio("whatsapp:+16195550100", "", "HX1", "").hasAllContentTemplates());
         assertEquals("HX123", twilio("", "HX123").contentSid(NotificationKind.WEEK_PUBLISHED));
         assertFalse(new WhatsAppSettings(true, "", "", "v22.0", "en_US", "", "a", "b", "c", "d", "x").isConnected(),
                 "Meta still needs its own settings");

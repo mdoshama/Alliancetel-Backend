@@ -95,7 +95,25 @@ public class WhatsAppSettings {
 
     /** The Sandbox number people send the join phrase to, e.g. +14155238886 (null unless using the Sandbox). */
     public String getSandboxNumber() {
-        return isTwilio() && !twilioSandboxJoin.isEmpty() ? twilioFrom.replace("whatsapp:", "") : null;
+        return isSandbox() ? SANDBOX_NUMBER : null;
+    }
+
+    /** Twilio's shared WhatsApp Sandbox number (testing only). */
+    public static final String SANDBOX_NUMBER = "+14155238886";
+
+    /** Sending from Twilio's Sandbox (the default sender) rather than your own registered WhatsApp number. */
+    public boolean isSandbox() {
+        return isTwilio() && SANDBOX_NUMBER.equals(twilioFrom.replace("whatsapp:", ""));
+    }
+
+    /** The number WhatsApp messages come from, e.g. +16195550100 (Twilio only). */
+    public String getSenderNumber() {
+        return isTwilio() ? twilioFrom.replace("whatsapp:", "") : null;
+    }
+
+    /** All four approved Twilio Content templates are set (needed outside the 24-hour window on your own number). */
+    public boolean hasAllContentTemplates() {
+        return twilioContentSids.values().stream().noneMatch(String::isEmpty);
     }
 
     /** The approved Twilio Content template for this kind of message, or "" to send it as plain text. */

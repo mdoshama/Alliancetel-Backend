@@ -70,7 +70,8 @@ public class NotificationService {
                 people.stream().filter(e -> e.getRole() != Role.ADMIN && e.getPhone() != null && !e.isSmsOptIn())
                         .count(),
                 settings.isTwilio() ? "twilio" : "meta", settings.getSandboxNumber(),
-                settings.getSandboxNumber() == null ? null : settings.getTwilioSandboxJoin());
+                settings.getSandboxNumber() == null ? null : blankToNull(settings.getTwilioSandboxJoin()),
+                settings.getSenderNumber(), settings.hasAllContentTemplates());
     }
 
     private long count(Long areaId, NotificationStatus status) {
@@ -140,5 +141,9 @@ public class NotificationService {
         n.setError(null);
         n.setNextAttemptAt(java.time.Instant.now());
         return NotificationResponse.from(n);
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s;
     }
 }

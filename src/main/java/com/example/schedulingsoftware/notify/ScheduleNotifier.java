@@ -32,16 +32,19 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ScheduleNotifier {
 
-    /** Template bodies to create (category Utility) in WhatsApp Manager, with these exact {{n}} values. */
+    /**
+     * Template bodies to create (category Utility) in WhatsApp Manager or Twilio's Content Template Builder, with these
+     * exact {{n}} values. Meta's rules: enough fixed words per variable, and no variable at the start or end.
+     */
     public static final Map<NotificationKind, String> TEMPLATE_TEXT = Map.of(
             NotificationKind.WEEK_PUBLISHED,
-            "Hi {{1}}, your AllianceTel schedule for {{2}} is posted: {{3}}. See it anytime at {{4}}.",
+            "Hi {{1}}, your AllianceTel work schedule for {{2}} is posted: {{3}}. View your full week here: {{4}} Thank you!",
             NotificationKind.WEEK_CHANGED,
-            "Hi {{1}}, your AllianceTel schedule for {{2}} has changed: {{3}}. See your full week at {{4}}.",
+            "Hi {{1}}, your AllianceTel work schedule for {{2}} has changed: {{3}}. View your full week here: {{4}} Thank you!",
             NotificationKind.DAY_OFF_DECISION,
-            "Hi {{1}}, your day-off request for {{2}} was {{3}}. {{4}}",
+            "Hi {{1}}, your AllianceTel day-off request for {{2}} was {{3}}. Details: {{4}} Contact your manager with any questions.",
             NotificationKind.ANNOUNCEMENT,
-            "Message from {{1}} for the AllianceTel {{2}} team: {{3}}");
+            "New message from {{1}} for the AllianceTel {{2}} team: {{3}} Please contact your manager with any questions.");
 
     private static final String NO_PHONE = "No phone number on file.";
     private static final String NO_CONSENT = "Hasn't agreed to WhatsApp messages yet.";

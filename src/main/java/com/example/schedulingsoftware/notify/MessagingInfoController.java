@@ -24,7 +24,10 @@ public class MessagingInfoController {
     @GetMapping("/api/auth/messaging")
     public MessagingInfo info() {
         String number = whatsApp.isConnected() ? whatsApp.getSandboxNumber() : null;
-        return new MessagingInfo(whatsApp.isConnected(), whatsApp.isTwilio() ? "twilio" : "meta", number,
-                number == null ? null : whatsApp.getTwilioSandboxJoin(), sms.isConnected());
+        String join = whatsApp.getTwilioSandboxJoin();
+        // Join instructions only while sending from the Sandbox, and only if the join phrase is set.
+        boolean showJoin = number != null && join != null && !join.isBlank();
+        return new MessagingInfo(whatsApp.isConnected(), whatsApp.isTwilio() ? "twilio" : "meta",
+                showJoin ? number : null, showJoin ? join : null, sms.isConnected());
     }
 }

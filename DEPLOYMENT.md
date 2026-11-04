@@ -276,10 +276,10 @@ Meta's **WhatsApp Cloud API**. Until these steps are done, no WhatsApp messages 
 
    | Name | Body |
    |---|---|
-   | `schedule_published` | `Hi {{1}}, your AllianceTel schedule for {{2}} is posted: {{3}}. See it anytime at {{4}}.` |
-   | `schedule_changed` | `Hi {{1}}, your AllianceTel schedule for {{2}} has changed: {{3}}. See your full week at {{4}}.` |
-   | `day_off_update` | `Hi {{1}}, your day-off request for {{2}} was {{3}}. {{4}}` |
-   | `team_announcement` | `Message from {{1}} for the AllianceTel {{2}} team: {{3}}` |
+   | `schedule_published` | `Hi {{1}}, your AllianceTel work schedule for {{2}} is posted: {{3}}. View your full week here: {{4}} Thank you!` |
+   | `schedule_changed` | `Hi {{1}}, your AllianceTel work schedule for {{2}} has changed: {{3}}. View your full week here: {{4}} Thank you!` |
+   | `day_off_update` | `Hi {{1}}, your AllianceTel day-off request for {{2}} was {{3}}. Details: {{4}} Contact your manager with any questions.` |
+   | `team_announcement` | `New message from {{1}} for the AllianceTel {{2}} team: {{3}} Please contact your manager with any questions.` |
 
 5. **Railway → backend service → Variables**, add:
 

@@ -43,7 +43,9 @@ public final class NotificationDtos {
             /** Text messages: connected, who they come from, and people with a phone who haven't agreed yet. */
             boolean smsConnected, String smsFrom, long smsNotAgreed,
             /** WhatsApp through "meta" or "twilio", and the Twilio Sandbox number and join phrase, if used. */
-            String whatsappProvider, String sandboxNumber, String sandboxJoin) {
+            String whatsappProvider, String sandboxNumber, String sandboxJoin,
+            /** Twilio: the number WhatsApp comes from, and whether all four approved templates are set. */
+            String whatsappFrom, boolean whatsappTemplatesReady) {
     }
 
     public record AnnounceRequest(

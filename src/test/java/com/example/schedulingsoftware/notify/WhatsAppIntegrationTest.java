@@ -116,7 +116,7 @@ class WhatsAppIntegrationTest {
         assertEquals(4, a.paramList().size());
         assertEquals("Ana", a.paramList().get(0));
         assertTrue(a.paramList().get(2).contains("Harbor 10am–8pm"), a.paramList().get(2));
-        assertTrue(a.getPreview().startsWith("Hi Ana, your AllianceTel schedule for "), a.getPreview());
+        assertTrue(a.getPreview().startsWith("Hi Ana, your AllianceTel work schedule for "), a.getPreview());
         assertFalse(a.getParams().contains("\n"));
 
         assertEquals(NotificationStatus.NOT_SENT, sentTo(ben).getFirst().getStatus());
@@ -173,7 +173,7 @@ class WhatsAppIntegrationTest {
         List<Notification> forAna = sentTo(ana);
         assertEquals(1, forAna.size(), "the decision only; no separate 'schedule changed' message");
         assertEquals(NotificationKind.DAY_OFF_DECISION, forAna.getFirst().getKind());
-        assertTrue(forAna.getFirst().getPreview().contains("was approved. Note from your manager: Have fun"),
+        assertTrue(forAna.getFirst().getPreview().contains("was approved. Details: Note from your manager: Have fun Contact your manager"),
                 forAna.getFirst().getPreview());
 
         Long second = dayOffService.create(new CreateDayOffRequest(dev, List.of(monday.plusDays(4)), null, null)).getFirst().id();
