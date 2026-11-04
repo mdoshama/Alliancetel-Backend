@@ -128,6 +128,7 @@ class SmsIntegrationTest {
 
         TestUsers.signInAs(ana, Role.EMPLOYEE, area);
         assertTrue(authService.setSms(true).smsOptIn());
+        assertTrue(employeeRepository.findById(ana).orElseThrow().getSmsConsentAt() != null, "when they agreed is kept");
         assertFalse(authService.setSms(false).smsOptIn());
     }
 

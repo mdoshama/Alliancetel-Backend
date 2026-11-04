@@ -72,8 +72,9 @@ public final class EmployeeDtos {
             Instant lastLoginAt,
             boolean whatsappOptIn,
             boolean emailOptIn,
-            /** Agreed to text messages (only they can turn it on). */
-            boolean smsOptIn) {
+            /** Agreed to text messages (only they can turn it on), and when. */
+            boolean smsOptIn,
+            Instant smsConsentAt) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -96,7 +97,8 @@ public final class EmployeeDtos {
                     e.getLastLoginAt(),
                     e.isWhatsappOptIn(),
                     e.isEmailOptIn(),
-                    e.isSmsOptIn());
+                    e.isSmsOptIn(),
+                    e.getSmsConsentAt());
         }
     }
 

@@ -124,6 +124,10 @@ public class AuthService {
             throw new BusinessRuleException("There's no phone number on file for you. Ask your manager to add it.");
         }
         e.setSmsOptIn(optIn);
+        if (optIn) {
+            e.setSmsConsentAt(java.time.Instant.now());
+            log.info("Text-message consent recorded for employee {}", e.getId());
+        }
         return Me.from(e);
     }
 

@@ -90,6 +90,9 @@ public class Employee {
     @ColumnDefault("false")
     private boolean smsOptIn;
 
+    /** When they last agreed to text messages (shown the SMS Terms and consent wording), for the carrier records. */
+    private java.time.Instant smsConsentAt;
+
     /** Gets schedule updates by email (on unless they turn it off). */
     @Column(nullable = false)
     @ColumnDefault("true")

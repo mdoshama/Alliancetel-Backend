@@ -359,6 +359,15 @@ done, no text messages are made; email keeps working.
    from AllianceTel. Msg & data rates may apply. Reply STOP to stop, HELP for help.*" Sample message: `Hi Ana, your
    AllianceTel schedule for Nov 9-15 is posted: Mon 11/9 Oceanside 10am-8pm, ... Reply STOP to opt out.`
    Twilio creates a **Messaging Service** for the campaign; add your number to it. Approval can take a few days.
+   The campaign also asks for:
+   - **Privacy policy URL:** `https://<your site>/privacy` · **Terms URL:** `https://<your site>/terms` (the SMS
+     Terms section is at `/terms#sms-terms`). Both are plain pages anyone can open, served by the frontend.
+     The brand name, contact email and message frequency in them are set in
+     `scheduling-software-frontend/public/privacy/index.html`, `public/terms/index.html` and
+     `src/app/features/legal/legal-info.ts`; keep the brand name exactly as registered.
+   - **Opt-in:** people turn on *By text message* in their account menu, see the consent wording (purpose,
+     frequency, "Message and data rates may apply", STOP/HELP, links to both pages) and tap **I agree**; the app
+     records when. A screenshot of that box is the opt-in proof.
    (A toll-free number with *toll-free verification* is the alternative.)
 4. **Railway → backend service → Variables**, add:
 
