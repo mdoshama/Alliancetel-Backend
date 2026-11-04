@@ -365,9 +365,12 @@ done, no text messages are made; email keeps working.
      The brand name, contact email and message frequency in them are set in
      `scheduling-software-frontend/public/privacy/index.html`, `public/terms/index.html` and
      `src/app/features/legal/legal-info.ts`; keep the brand name exactly as registered.
-   - **Opt-in:** people turn on *By text message* in their account menu, see the consent wording (purpose,
-     frequency, "Message and data rates may apply", STOP/HELP, links to both pages) and tap **I agree**; the app
-     records when. A screenshot of that box is the opt-in proof.
+   - **Opt-in method:** choose the online/website (app) method, not paper. Employees turn on *By text message* in
+     their account menu, see their mobile number and the consent wording (purpose, frequency, "Message and data
+     rates may apply", STOP/HELP, links to both pages), tick the unchecked **I agree** box and tap **Turn on text
+     messages**. The app records when and sends the confirmation text.
+   - **Opt-in proof URL:** `https://<your site>/sms-consent`, a public page showing the steps, a screenshot of the
+     form (`public/sms-consent/opt-in-form.png`), the exact consent language and the confirmation message.
    (A toll-free number with *toll-free verification* is the alternative.)
 4. **Railway → backend service → Variables**, add:
 

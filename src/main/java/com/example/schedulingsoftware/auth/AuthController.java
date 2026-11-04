@@ -24,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 public class AuthController {
 
     private final AuthService authService;
+    private final com.example.schedulingsoftware.notify.ScheduleNotifier notifier;
 
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
@@ -45,7 +46,12 @@ public class AuthController {
     /** Anyone can turn their own text-message updates on (if they have a phone number on file) or off. */
     @PutMapping("/me/sms")
     public Me sms(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {
-        return authService.setSms(body.optIn());
+        boolean wasOn = authService.me().smsOptIn();
+        Me me = authService.setSms(body.optIn());
+        if (me.smsOptIn() && !wasOn) {
+            notifier.smsOptInConfirmation(me.id());
+        }
+        return me;
     }
 
     /** Anyone can turn their own email schedule updates off or back on. */

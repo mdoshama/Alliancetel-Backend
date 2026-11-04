@@ -9,5 +9,7 @@ public enum NotificationKind {
     /** Their day-off request was approved or rejected. */
     DAY_OFF_DECISION,
     /** A message from a manager or admin to everyone in an area. */
-    ANNOUNCEMENT
+    ANNOUNCEMENT,
+    /** Text only: the one-time confirmation sent when someone agrees to text messages. */
+    SMS_OPT_IN
 }

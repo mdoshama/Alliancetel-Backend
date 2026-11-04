@@ -54,6 +54,11 @@ public class ScheduleNotifier {
     private final NotificationRepository repository;
     private final WhatsAppSettings settings;
     private final SmsSettings smsSettings;
+    private final com.example.schedulingsoftware.employee.EmployeeRepository employeeRepository;
+
+    /** Sent once when someone agrees to texts (the opt-in confirmation carriers expect); fits one SMS part. */
+    public static final String SMS_OPT_IN_TEXT = "AllianceTel (NAZRA ANWAR LLC): You're signed up for work schedule texts. "
+            + "Msg freq varies. Msg&data rates may apply. Reply HELP for help, STOP to cancel.";
 
     /**
      * Right after a week is published. The first time, everyone gets their whole week; when it is published again
@@ -111,6 +116,22 @@ public class ScheduleNotifier {
                 "Update: your day off on " + when + " was " + result,
                 "Hi " + e.getFirstName() + ",\n\nThe decision on your day-off request for " + when + " was " + result
                         + ".\n\n" + extra);
+    }
+
+    /** The opt-in confirmation text, right after someone agrees to texts (only when texting is connected). */
+    @org.springframework.transaction.annotation.Transactional
+    public void smsOptInConfirmation(Long employeeId) {
+        Employee e = employeeRepository.findById(employeeId).orElse(null);
+        if (e == null || !smsSettings.isConnected() || e.getPhone() == null || !e.isSmsOptIn()) {
+            return;
+        }
+        Notification sms = base(e, NotificationKind.SMS_OPT_IN, NotificationChannel.SMS);
+        sms.setPhone(e.getPhone());
+        sms.setTemplate("sms");
+        sms.setParamList(List.of());
+        sms.setBody(SMS_OPT_IN_TEXT);
+        sms.setPreview(SMS_OPT_IN_TEXT);
+        repository.save(sms);
     }
 
     /** A message from a manager or admin to everyone active in an area. @return people it was queued for */
@@ -239,6 +260,7 @@ public class ScheduleNotifier {
             case DAY_OFF_DECISION -> "AllianceTel: Hi " + p.get(0) + ", your day off " + p.get(1) + " was " + p.get(2)
                     + ". " + p.get(3);
             case ANNOUNCEMENT -> "AllianceTel " + p.get(1) + " (" + p.get(0) + "): " + p.get(2);
+            case SMS_OPT_IN -> SMS_OPT_IN_TEXT;
         };
         return fitSms(body);
     }

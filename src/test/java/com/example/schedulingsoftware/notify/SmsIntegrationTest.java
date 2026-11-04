@@ -132,6 +132,22 @@ class SmsIntegrationTest {
         assertFalse(authService.setSms(false).smsOptIn());
     }
 
+    @Autowired
+    ScheduleNotifier notifier;
+
+    @Test
+    void agreeingSendsTheOptInConfirmationOnce() {
+        notifier.smsOptInConfirmation(ana);
+        Notification confirmation = sms(ana);
+        assertEquals(NotificationKind.SMS_OPT_IN, confirmation.getKind());
+        assertEquals(ScheduleNotifier.SMS_OPT_IN_TEXT, confirmation.getBody());
+        assertTrue(confirmation.getBody().length() <= 160);
+        assertTrue(confirmation.getBody().contains("Msg&data rates may apply") && confirmation.getBody().contains("STOP"));
+        long before = notifications.count();
+        notifier.smsOptInConfirmation(ben);
+        assertEquals(before, notifications.count(), "Ben hasn't agreed, so nothing is sent");
+    }
+
     @Test
     void announcementsCountPeopleReachableByText() {
         TestUsers.signInAs(ben, Role.EMPLOYEE, area);

@@ -52,6 +52,7 @@ public class NotificationService {
     public WhatsAppStatus status() {
         Long areaId = accessPolicy.restrictToArea(null);
         List<TemplateInfo> templates = Arrays.stream(NotificationKind.values())
+                .filter(k -> ScheduleNotifier.TEMPLATE_TEXT.containsKey(k))
                 .map(k -> new TemplateInfo(k, settings.template(k), ScheduleNotifier.TEMPLATE_TEXT.get(k)))
                 .toList();
         List<Employee> people = areaId == null ? employeeRepository.findAll().stream().filter(Employee::isActive).toList()
