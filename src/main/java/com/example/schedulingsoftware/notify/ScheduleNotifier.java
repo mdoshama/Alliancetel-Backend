@@ -60,7 +60,7 @@ public class ScheduleNotifier {
     private final com.example.schedulingsoftware.employee.EmployeeRepository employeeRepository;
 
     /** Sent once when someone agrees to texts (the opt-in confirmation carriers expect); fits one SMS part. */
-    public static final String SMS_OPT_IN_TEXT = "AllianceTel (NAZRA ANWAR LLC): You're signed up for work schedule texts. "
+    public static final String SMS_OPT_IN_TEXT = "AllianceTel Enterprise: You're signed up for work schedule texts. "
             + "Msg freq varies. Msg&data rates may apply. Reply HELP for help, STOP to cancel.";
 
     /**
