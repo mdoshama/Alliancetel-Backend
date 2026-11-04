@@ -77,6 +77,7 @@ public class SecurityConfig {
                                 "/api/day-off-requests/*/change-decision", "/api/day-off-requests/approve-many")
                                 .hasAnyRole(ADMIN, MANAGER)
                         .requestMatchers("/api/day-off-requests/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/notifications", "/api/notifications/**").hasRole(ADMIN)
                         .requestMatchers("/api/notifications/**").hasAnyRole(ADMIN, MANAGER)
 
                         // Device list for logging sales: everyone reads it, admins keep it.

@@ -44,6 +44,20 @@ public class NotificationController {
         return service.announce(body.areaId(), body.message());
     }
 
+    /** Admins only: remove one message from the history. */
+    @org.springframework.web.bind.annotation.DeleteMapping("/{id}")
+    public org.springframework.http.ResponseEntity<Void> delete(@PathVariable Long id) {
+        service.delete(id);
+        return org.springframework.http.ResponseEntity.noContent().build();
+    }
+
+    /** Admins only: clear messages older than {@code olderThanDays} (optionally one area). */
+    @org.springframework.web.bind.annotation.DeleteMapping
+    public java.util.Map<String, Integer> clear(@RequestParam int olderThanDays,
+            @RequestParam(required = false) Long areaId) {
+        return java.util.Map.of("deleted", service.deleteOlderThan(olderThanDays, areaId));
+    }
+
     @PostMapping("/{id}/retry")
     public NotificationResponse retry(@PathVariable Long id) {
         return service.retry(id);

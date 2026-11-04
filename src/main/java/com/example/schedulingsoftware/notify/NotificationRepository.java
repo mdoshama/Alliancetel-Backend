@@ -31,4 +31,14 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     long countByStatus(NotificationStatus status);
 
     java.util.Optional<Notification> findFirstByProviderMessageId(String providerMessageId);
+
+    /** Removes messages created before the given time (optionally one area), except ones still being sent. */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("""
+            delete from Notification n
+            where n.createdAt < :before
+              and n.status <> com.example.schedulingsoftware.notify.NotificationStatus.QUEUED
+              and (:areaId is null or n.areaId = :areaId)
+            """)
+    int deleteOlderThan(@Param("before") Instant before, @Param("areaId") Long areaId);
 }

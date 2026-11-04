@@ -101,6 +101,36 @@ public class NotificationService {
         return new AnnounceResult(n, reachable);
     }
 
+    /** Admins only: removes one message from the history (not one that's still being sent). */
+    @Transactional
+    public void delete(Long id) {
+        requireAdmin();
+        Notification n = repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Message", id));
+        if (n.getStatus() == NotificationStatus.QUEUED) {
+            throw new BusinessRuleException("This message is still being sent. Try again in a minute.");
+        }
+        repository.delete(n);
+    }
+
+    /**
+     * Admins only: clears messages older than the given number of days (all areas, or one), keeping any still being
+     * sent. @return how many were removed
+     */
+    @Transactional
+    public int deleteOlderThan(int days, Long areaId) {
+        requireAdmin();
+        if (days < 1 || days > 3650) {
+            throw new BusinessRuleException("Choose between 1 and 3650 days.");
+        }
+        return repository.deleteOlderThan(java.time.Instant.now().minus(java.time.Duration.ofDays(days)), areaId);
+    }
+
+    private void requireAdmin() {
+        if (!accessPolicy.current().isAdmin()) {
+            throw new org.springframework.security.access.AccessDeniedException("Only admins can delete messages.");
+        }
+    }
+
     /** Queues a failed or unsent message again, with the person's current phone number. */
     @Transactional
     public NotificationResponse retry(Long id) {
