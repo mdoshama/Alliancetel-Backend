@@ -145,7 +145,10 @@ public class PerformanceService {
                 .toList();
         return new Profile(e.getId(), e.getFullName(), e.getEmployeeCode(), e.getRole(),
                 e.getArea() == null ? null : e.getArea().getName(),
-                e.getHomeStore() == null ? null : e.getHomeStore().getName(), e.getEmail(), e.isActive(), from, to,
+                // Employees don't see home stores: whether someone is primary, secondary or a floater is for admins
+                // and managers only.
+                e.getHomeStore() == null || accessPolicy.current().isEmployee() ? null : e.getHomeStore().getName(),
+                e.getEmail(), e.isActive(), from, to,
                 stats, days(mine, from, to),
                 stores.values().stream().sorted(Comparator.comparing(StoreStats::boxes).reversed()).toList(),
                 recent, rank, everyone.size());

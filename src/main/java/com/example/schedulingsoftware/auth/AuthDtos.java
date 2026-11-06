@@ -44,11 +44,13 @@ public final class AuthDtos {
             java.time.LocalDate birthDate) {
 
         public static Me from(Employee e) {
+            // Employees aren't told their home store: primary / secondary / floater is for admins and managers.
+            boolean showStore = e.getRole() != Role.EMPLOYEE && e.getHomeStore() != null;
             return new Me(e.getId(), e.getEmployeeCode(), e.getFullName(), e.getEmail(), e.getRole(),
                     e.getArea() == null ? null : e.getArea().getId(),
                     e.getArea() == null ? null : e.getArea().getName(),
-                    e.getHomeStore() == null ? null : e.getHomeStore().getId(),
-                    e.getHomeStore() == null ? null : e.getHomeStore().getName(),
+                    showStore ? e.getHomeStore().getId() : null,
+                    showStore ? e.getHomeStore().getName() : null,
                     e.isMustChangePassword(),
                     e.getPhone(),
                     e.isWhatsappOptIn(),
