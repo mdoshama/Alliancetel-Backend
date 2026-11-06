@@ -38,6 +38,7 @@ public class EmployeeService {
     private final AccessPolicy accessPolicy;
     private final PasswordEncoder passwordEncoder;
     private final StoreService storeService;
+    private final com.example.schedulingsoftware.auth.PasswordSetupService passwordSetup;
 
     @Transactional(readOnly = true)
     public List<EmployeeResponse> search(Long requestedAreaId, Role role, Boolean active, String query) {
@@ -132,6 +133,15 @@ public class EmployeeService {
 
     @Transactional
     public CredentialsResponse create(EmployeeRequest request) {
+        return create(request, false);
+    }
+
+    /**
+     * Creates the account with a temporary password and emails them a link to choose their own (also by text when
+     * {@code textLink}: the admin confirms they agreed to get it by text).
+     */
+    @Transactional
+    public CredentialsResponse create(EmployeeRequest request, boolean textLink) {
         String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (employeeRepository.existsByEmployeeCodeIgnoreCase(code)) {
@@ -144,7 +154,10 @@ public class EmployeeService {
         apply(employee, request, code, email);
         String temporary = PasswordPolicy.generateTemporary();
         employee.setPassword(passwordEncoder.encode(temporary), true);
-        return new CredentialsResponse(EmployeeResponse.from(employeeRepository.save(employee)), temporary);
+        Employee saved = employeeRepository.save(employee);
+        var link = passwordSetup.send(saved, true, textLink);
+        return new CredentialsResponse(EmployeeResponse.from(saved), temporary, link.emailed(), link.texted(),
+                link.note());
     }
 
     @Transactional
@@ -202,6 +215,12 @@ public class EmployeeService {
     /** Issues a new temporary password; the employee must change it at next sign-in. */
     @Transactional
     public CredentialsResponse resetPassword(Long id) {
+        return resetPassword(id, false);
+    }
+
+    /** Same, also emailing (and texting, if they agreed to texts or {@code textLink}) a link to choose a new one. */
+    @Transactional
+    public CredentialsResponse resetPassword(Long id, boolean textLink) {
         Employee employee = getEmployee(id);
         if (!employee.isActive()) {
             throw new BusinessRuleException(employee.getFullName() + " is inactive. Reactivate them first.");
@@ -210,11 +229,32 @@ public class EmployeeService {
         // Also signs them out everywhere, in case the reset is because someone else knew the old password.
         employee.setPassword(passwordEncoder.encode(temporary), true);
         log.info("Password reset for {} (by {})", employee.getEmail(), accessPolicy.current().email());
-        return new CredentialsResponse(EmployeeResponse.from(employee), temporary);
+        var link = passwordSetup.send(employee, false, textLink);
+        return new CredentialsResponse(EmployeeResponse.from(employee), temporary, link.emailed(), link.texted(),
+                link.note());
     }
 
     public Employee getEmployee(Long id) {
         return employeeRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Employee", id));
+    }
+
+    /** Youngest and oldest ages accepted for a birth date, to catch typos like a wrong year. */
+    static final int MIN_AGE = 14;
+    static final int MAX_AGE = 100;
+
+    /** Checks a birth date (null = none on file); also used when people edit their own profile. */
+    public static java.time.LocalDate checkBirthDate(java.time.LocalDate birthDate) {
+        if (birthDate == null) {
+            return null;
+        }
+        java.time.LocalDate today = java.time.LocalDate.now();
+        if (birthDate.isAfter(today.minusYears(MIN_AGE))) {
+            throw new BusinessRuleException("Birth date must be at least " + MIN_AGE + " years ago. Check the year.");
+        }
+        if (birthDate.isBefore(today.minusYears(MAX_AGE))) {
+            throw new BusinessRuleException("Birth date is more than " + MAX_AGE + " years ago. Check the year.");
+        }
+        return birthDate;
     }
 
     private void apply(Employee employee, EmployeeRequest request, String code, String email) {
@@ -250,6 +290,7 @@ public class EmployeeService {
             employee.setPrimaryAtStore(false);
         }
         employee.setWorkDaysPerWeek(request.workDaysPerWeek());
+        employee.setBirthDate(checkBirthDate(request.birthDate()));
         if (request.whatsappOptIn() != null) {
             if (request.whatsappOptIn() && employee.getPhone() == null) {
                 throw new BusinessRuleException("Add a phone number to send WhatsApp schedule updates.");

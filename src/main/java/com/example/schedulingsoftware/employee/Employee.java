@@ -51,6 +51,9 @@ public class Employee {
     @Column(length = 30)
     private String phone;
 
+    /** Date of birth (optional). Admins and managers get a reminder before the birthday; see BirthdayService. */
+    private java.time.LocalDate birthDate;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Role role = Role.EMPLOYEE;

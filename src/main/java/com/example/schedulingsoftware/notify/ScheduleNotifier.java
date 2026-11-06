@@ -137,6 +137,54 @@ public class ScheduleNotifier {
         repository.save(sms);
     }
 
+    /**
+     * The set-password link, by email always (it's needed to sign in, so it ignores the email-updates switch), and
+     * by text when texting is connected, there's a phone number, and they agreed to texts or {@code textToo} (the
+     * admin confirms they agreed to get this link by text). The Messages page shows it without the link.
+     *
+     * @return whether a text was queued
+     */
+    public boolean passwordLink(Employee e, String link, boolean newAccount, String validFor, boolean textToo) {
+        String subject = newAccount ? "Set up your AllianceTel account" : "Reset your AllianceTel password";
+        String text = newAccount
+                ? "Hi " + e.getFirstName() + ",\n\nAn AllianceTel Enterprise account was created for you. You'll sign in with "
+                        + "this email: " + e.getEmail() + "\n\nChoose your password here:\n" + link
+                        + "\n\nThe link works once and expires in " + validFor + ". If you didn't expect this, contact your manager."
+                : "Hi " + e.getFirstName() + ",\n\nYour AllianceTel password was reset. Choose a new one here:\n" + link
+                        + "\n\nThe link works once and expires in " + validFor + ". If you didn't ask for this, tell your manager.";
+        String hidden = subject + " — set-password link sent to " + e.getFirstName() + " (hidden here for security).";
+        if (e.getEmail() != null) {
+            Notification mail = base(e, NotificationKind.ACCOUNT_SETUP, NotificationChannel.EMAIL);
+            mail.setEmail(e.getEmail());
+            mail.setTemplate("email");
+            mail.setParamList(List.of());
+            mail.setSubject(subject);
+            mail.setBody(cut(text, 4000));
+            mail.setPreview(hidden);
+            repository.save(mail);
+        }
+        if (!smsSettings.isConnected() || e.getPhone() == null || !(textToo || e.isSmsOptIn())) {
+            return false;
+        }
+        String intro = newAccount ? "AllianceTel: Hi " + tidy(e.getFirstName()) + ", your account is ready. Set your password: "
+                : "AllianceTel: Reset your password: ";
+        String body = fitSms(intro + link);
+        if (!body.contains(link)) {
+            body = fitSms("AllianceTel password link: " + link);
+        }
+        if (!body.contains(link)) {
+            return false; // The app address is too long for one text; the email has the link.
+        }
+        Notification sms = base(e, NotificationKind.ACCOUNT_SETUP, NotificationChannel.SMS);
+        sms.setPhone(e.getPhone());
+        sms.setTemplate("sms");
+        sms.setParamList(List.of());
+        sms.setBody(body);
+        sms.setPreview(hidden);
+        repository.save(sms);
+        return true;
+    }
+
     /** A message from a manager or admin to everyone active in an area. @return people it was queued for */
     public int announce(Area area, List<Employee> people, String fromName, String message) {
         int n = 0;
@@ -264,6 +312,8 @@ public class ScheduleNotifier {
                     + ". " + p.get(3);
             case ANNOUNCEMENT -> "AllianceTel " + p.get(1) + " (" + p.get(0) + "): " + p.get(2);
             case SMS_OPT_IN -> SMS_OPT_IN_TEXT;
+            case BIRTHDAY_REMINDER -> "AllianceTel: team birthdays coming up. See the dashboard for details.";
+            case ACCOUNT_SETUP -> "AllianceTel: check your email to set your password.";
         };
         return fitSms(body);
     }

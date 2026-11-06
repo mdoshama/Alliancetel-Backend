@@ -65,6 +65,13 @@ alliancetel:
   scheduling:
     # How many day-off requests one employee may have (pending + approved) in a single Mon-Sun week
     max-day-off-requests-per-week: ${MAX_DAY_OFF_PER_WEEK:2}
+  # Birthday reminder emails to admins (everyone) and managers (their area), from each employee's birth date.
+  birthdays:
+    reminders-enabled: ${BIRTHDAY_REMINDERS_ENABLED:true}
+    # Days before the birthday to send a reminder; 0 = on the day itself.
+    remind-days-before: ${BIRTHDAY_REMIND_DAYS:7,0}
+    # The company's time zone, for "today" and when the daily check runs (hourly 8am-6pm, at most one email a day).
+    zone: ${BIRTHDAY_ZONE:America/Los_Angeles}
   demo-data:
     # Seeds sample areas/stores/staff into an empty database; sample accounts use the password Welcome123
     enabled: ${DEMO_DATA:true}

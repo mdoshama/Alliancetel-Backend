@@ -35,6 +35,14 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
 
     boolean existsByHomeStoreId(Long storeId);
 
+    /** Active people with a birth date on file, for birthday lists and reminders. */
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = { "area", "homeStore" })
+    List<Employee> findByActiveTrueAndBirthDateIsNotNull();
+
+    /** Active admins and managers: who gets birthday reminders. */
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = { "area" })
+    List<Employee> findByActiveTrueAndRoleIn(Collection<Role> roles);
+
     long countByHomeStoreIdAndActiveTrue(Long storeId);
 
     @Query("select e.homeStore.id, count(e) from Employee e where e.active = true and e.homeStore is not null group by e.homeStore.id")

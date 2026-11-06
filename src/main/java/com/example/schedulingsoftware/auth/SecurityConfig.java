@@ -56,6 +56,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        // Set-password links from the welcome / reset email: the link's secret is the proof.
+                        .requestMatchers(HttpMethod.POST, "/api/auth/setup-password", "/api/auth/setup-password/check")
+                                .permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Twilio delivery reports: no sign-in, checked by Twilio's signature instead.

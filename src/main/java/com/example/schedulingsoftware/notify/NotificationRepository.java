@@ -30,6 +30,9 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
 
     long countByStatus(NotificationStatus status);
 
+    /** Whether this person already got a message of this kind since the given time (birthday reminders: once a day). */
+    boolean existsByEmployee_IdAndKindAndCreatedAtGreaterThanEqual(Long employeeId, NotificationKind kind, Instant since);
+
     java.util.Optional<Notification> findFirstByProviderMessageId(String providerMessageId);
 
     /** Removes messages created before the given time (optionally one area), except ones still being sent. */

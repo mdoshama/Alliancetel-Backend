@@ -33,6 +33,7 @@ public class AuthService {
     private final LoginAttemptService loginAttempts;
     private final RevokedTokenRepository revokedTokens;
     private final Duration temporaryPasswordLifetime;
+    private final PasswordSetupService passwordSetup;
     /**
      * Checked when the email is unknown, so a wrong email takes as long as a wrong password and response times
      * don't reveal which emails have accounts.
@@ -41,7 +42,9 @@ public class AuthService {
 
     public AuthService(EmployeeRepository employeeRepository, PasswordEncoder passwordEncoder, JwtService jwtService,
             AccessPolicy accessPolicy, LoginAttemptService loginAttempts, RevokedTokenRepository revokedTokens,
-            @Value("${alliancetel.security.temporary-password-hours:168}") long temporaryPasswordHours) {
+            @Value("${alliancetel.security.temporary-password-hours:168}") long temporaryPasswordHours,
+            PasswordSetupService passwordSetup) {
+        this.passwordSetup = passwordSetup;
         this.employeeRepository = employeeRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
@@ -139,6 +142,26 @@ public class AuthService {
     }
 
     /**
+     * Updates the signed-in person's own phone number and birth date. A new number turns text messages off until
+     * they agree again (consent is for a number); no number turns WhatsApp off too.
+     */
+    @Transactional
+    public Me updateProfile(String phone, java.time.LocalDate birthDate) {
+        Employee e = load(accessPolicy.current().id());
+        String normalized = com.example.schedulingsoftware.common.PhoneNumbers.normalize(phone);
+        if (!java.util.Objects.equals(normalized, e.getPhone())) {
+            e.setSmsOptIn(false);
+        }
+        e.setPhone(normalized);
+        if (normalized == null) {
+            e.setWhatsappOptIn(false);
+        }
+        e.setBirthDate(com.example.schedulingsoftware.employee.EmployeeService.checkBirthDate(birthDate));
+        log.info("Profile updated by employee {}", e.getId());
+        return Me.from(e);
+    }
+
+    /**
      * Sets a new password and signs out every other session. Wrong current passwords count towards the same
      * lock as failed sign-ins, so a stolen session can't be used to guess the password.
      */
@@ -159,6 +182,40 @@ public class AuthService {
         loginAttempts.recordSuccess(e.getEmail());
         log.info("Password changed: {} from {}", e.getEmail(), clientIp);
         return issue(e);
+    }
+
+    /** Who a set-password link is for (wrong, used and expired links count towards the sign-in lock). */
+    @Transactional(readOnly = true)
+    public AuthDtos.SetupLinkInfo setupLinkInfo(String token, String clientIp) {
+        PasswordSetupToken t = checkLink(token, clientIp);
+        return new AuthDtos.SetupLinkInfo(t.getEmployee().getFirstName(), t.getEmployee().getEmail(), t.isNewAccount());
+    }
+
+    /**
+     * Sets the password chosen from a set-password link and signs them in. The link then stops working, and so does
+     * any temporary password; other sessions are signed out.
+     */
+    @Transactional
+    public LoginResponse setupPassword(String token, String newPassword, String clientIp) {
+        PasswordSetupToken t = checkLink(token, clientIp);
+        Employee e = t.getEmployee();
+        PasswordPolicy.validate(newPassword, e.getFirstName(), e.getLastName(), e.getEmail());
+        e.setPassword(passwordEncoder.encode(newPassword), false);
+        e.setLastLoginAt(Instant.now());
+        passwordSetup.used(e);
+        loginAttempts.recordSuccess(e.getEmail());
+        log.info("Password set from emailed link: {} from {}", e.getEmail(), clientIp);
+        return issue(e);
+    }
+
+    private PasswordSetupToken checkLink(String token, String clientIp) {
+        loginAttempts.checkAllowed("set-password-link@" + clientIp, clientIp);
+        try {
+            return passwordSetup.find(token);
+        } catch (BusinessRuleException ex) {
+            loginAttempts.recordFailure("set-password-link@" + clientIp, clientIp);
+            throw ex;
+        }
     }
 
     private boolean temporaryPasswordExpired(Employee e) {

@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Size;
 
 public final class EmployeeDtos {
@@ -32,19 +33,28 @@ public final class EmployeeDtos {
             /** Agreed to WhatsApp schedule updates (needs a phone number). Null keeps the current setting. */
             Boolean whatsappOptIn,
             /** Schedule updates by email. Null keeps the current setting. */
-            Boolean emailOptIn) {
+            Boolean emailOptIn,
+            /** Date of birth (optional), for birthday reminders. Null means not on file. */
+            @Past(message = "must be in the past") java.time.LocalDate birthDate) {
+
+        public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
+                Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
+                Boolean whatsappOptIn, Boolean emailOptIn) {
+            this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
+                    primaryAtStore, whatsappOptIn, emailOptIn, null);
+        }
 
         public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
                 Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore) {
             this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
-                    primaryAtStore, null, null);
+                    primaryAtStore, null, null, null);
         }
 
         public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
                 Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
                 Boolean whatsappOptIn) {
             this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
-                    primaryAtStore, whatsappOptIn, null);
+                    primaryAtStore, whatsappOptIn, null, null);
         }
     }
 
@@ -74,7 +84,8 @@ public final class EmployeeDtos {
             boolean emailOptIn,
             /** Agreed to text messages (only they can turn it on), and when. */
             boolean smsOptIn,
-            Instant smsConsentAt) {
+            Instant smsConsentAt,
+            java.time.LocalDate birthDate) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -98,11 +109,18 @@ public final class EmployeeDtos {
                     e.isWhatsappOptIn(),
                     e.isEmailOptIn(),
                     e.isSmsOptIn(),
-                    e.getSmsConsentAt());
+                    e.getSmsConsentAt(),
+                    e.getBirthDate());
         }
     }
 
     /** Returned once when an account is created or its password reset; the password is never stored in plain text. */
-    public record CredentialsResponse(EmployeeResponse employee, String temporaryPassword) {
+    public record CredentialsResponse(EmployeeResponse employee, String temporaryPassword,
+            /** A set-password link was emailed / texted to them; note says why not, if it wasn't. */
+            boolean linkEmailed, boolean linkTexted, String linkNote) {
+
+        public CredentialsResponse(EmployeeResponse employee, String temporaryPassword) {
+            this(employee, temporaryPassword, false, false, null);
+        }
     }
 }

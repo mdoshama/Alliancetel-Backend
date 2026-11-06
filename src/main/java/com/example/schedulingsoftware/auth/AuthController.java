@@ -32,6 +32,24 @@ public class AuthController {
         return authService.login(request.email(), request.password(), http.getRemoteAddr());
     }
 
+    /** Public: who a set-password link (from the welcome or reset email / text) is for. */
+    @PostMapping("/setup-password/check")
+    public AuthDtos.SetupLinkInfo checkSetupLink(@RequestBody AuthDtos.SetupPasswordRequest body, HttpServletRequest http) {
+        return authService.setupLinkInfo(body.token(), http.getRemoteAddr());
+    }
+
+    /** Public: choose a password from a set-password link; signs them in. */
+    @PostMapping("/setup-password")
+    public LoginResponse setupPassword(@Valid @RequestBody AuthDtos.SetupPasswordRequest body, HttpServletRequest http) {
+        return authService.setupPassword(body.token(), body.newPassword(), http.getRemoteAddr());
+    }
+
+    /** Your own phone number and birth date (name, NTID, email, role and store are kept by admins). */
+    @PutMapping("/me/profile")
+    public Me updateProfile(@Valid @RequestBody AuthDtos.ProfileUpdate body) {
+        return authService.updateProfile(body.phone(), body.birthDate());
+    }
+
     @GetMapping("/me")
     public Me me() {
         return authService.me();

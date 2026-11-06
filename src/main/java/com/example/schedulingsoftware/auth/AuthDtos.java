@@ -39,7 +39,9 @@ public final class AuthDtos {
             /** Gets schedule updates by email. */
             boolean emailOptIn,
             /** Gets schedule updates by text message. */
-            boolean smsOptIn) {
+            boolean smsOptIn,
+            /** Date of birth, or null when not on file. */
+            java.time.LocalDate birthDate) {
 
         public static Me from(Employee e) {
             return new Me(e.getId(), e.getEmployeeCode(), e.getFullName(), e.getEmail(), e.getRole(),
@@ -51,12 +53,32 @@ public final class AuthDtos {
                     e.getPhone(),
                     e.isWhatsappOptIn(),
                     e.isEmailOptIn(),
-                    e.isSmsOptIn());
+                    e.isSmsOptIn(),
+                    e.getBirthDate());
         }
     }
 
     /** Turn your own WhatsApp (or email) schedule updates on or off. */
     public record WhatsAppPreference(@jakarta.validation.constraints.NotNull Boolean optIn) {
+    }
+
+    /**
+     * What people can change about themselves: their phone number and birth date. Name, employee code (NTID), email,
+     * role, area and store are kept by admins.
+     */
+    public record ProfileUpdate(
+            @Size(max = 30) @jakarta.validation.constraints.Pattern(regexp = com.example.schedulingsoftware.common.InputRules.PHONE_CHARS,
+                    message = com.example.schedulingsoftware.common.InputRules.PHONE_CHARS_MSG) String phone,
+            @jakarta.validation.constraints.Past(message = "must be in the past") java.time.LocalDate birthDate) {
+    }
+
+    /** Choosing a password from the link in the welcome or reset email / text. */
+    public record SetupPasswordRequest(@NotBlank @Size(max = 100) String token,
+            @NotBlank @Size(max = 100) String newPassword) {
+    }
+
+    /** Who a set-password link is for, so the page can greet them. */
+    public record SetupLinkInfo(String firstName, String email, boolean newAccount) {
     }
 
     public record LoginResponse(String token, Instant expiresAt, Me user) {

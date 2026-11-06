@@ -11,5 +11,9 @@ public enum NotificationKind {
     /** A message from a manager or admin to everyone in an area. */
     ANNOUNCEMENT,
     /** Text only: the one-time confirmation sent when someone agrees to text messages. */
-    SMS_OPT_IN
+    SMS_OPT_IN,
+    /** Email to admins and managers: team birthdays coming up (and today). */
+    BIRTHDAY_REMINDER,
+    /** A one-time link to choose a password: new account or password reset. The link is never shown on the Messages page. */
+    ACCOUNT_SETUP
 }

@@ -23,7 +23,8 @@ public final class NotificationDtos {
             return new NotificationResponse(n.getId(), n.getEmployee() == null ? null : n.getEmployee().getId(),
                     n.getEmployee() == null ? null : n.getEmployee().getFullName(), n.getChannel(), n.getPhone(),
                     n.getEmail(), n.getSubject(), n.getKind(), n.getStatus(),
-                    n.getChannel() == NotificationChannel.EMAIL && n.getBody() != null ? n.getBody() : n.getPreview(),
+                    n.getChannel() == NotificationChannel.EMAIL && n.getBody() != null
+                            && n.getKind() != NotificationKind.ACCOUNT_SETUP ? n.getBody() : n.getPreview(),
                     n.getError(), n.getAttempts(), n.getCreatedAt(), n.getSentAt());
         }
     }

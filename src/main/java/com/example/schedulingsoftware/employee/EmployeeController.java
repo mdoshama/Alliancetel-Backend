@@ -30,6 +30,15 @@ import lombok.RequiredArgsConstructor;
 public class EmployeeController {
 
     private final EmployeeService employeeService;
+    private final BirthdayService birthdayService;
+
+    /** Birthdays in the next "days" days (default 30), soonest first. Admins: all areas; managers: their own. */
+    @GetMapping("/birthdays")
+    public List<BirthdayService.UpcomingBirthday> birthdays(
+            @RequestParam(required = false) Long areaId,
+            @RequestParam(required = false) Integer days) {
+        return birthdayService.upcoming(areaId, days);
+    }
 
     @GetMapping
     public List<EmployeeResponse> list(
@@ -62,8 +71,9 @@ public class EmployeeController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public CredentialsResponse create(@Valid @RequestBody EmployeeRequest request) {
-        return employeeService.create(request);
+    public CredentialsResponse create(@Valid @RequestBody EmployeeRequest request,
+            @RequestParam(defaultValue = "false") boolean textLink) {
+        return employeeService.create(request, textLink);
     }
 
     @PutMapping("/{id}")
@@ -77,8 +87,9 @@ public class EmployeeController {
     }
 
     @PostMapping("/{id}/reset-password")
-    public CredentialsResponse resetPassword(@PathVariable Long id) {
-        return employeeService.resetPassword(id);
+    public CredentialsResponse resetPassword(@PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean textLink) {
+        return employeeService.resetPassword(id, textLink);
     }
 
     @DeleteMapping("/{id}")
