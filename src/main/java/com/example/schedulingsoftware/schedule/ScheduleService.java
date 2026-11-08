@@ -8,6 +8,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -122,6 +123,15 @@ public class ScheduleService {
      */
     @Transactional
     public ScheduleResponse generate(Long areaId, LocalDate anyDayInWeek) {
+        return generate(areaId, anyDayInWeek, false);
+    }
+
+    /**
+     * @param force a manager or admin generating anyway, before everyone's requests are in (people without a request
+     *              simply work every day until given a day off)
+     */
+    @Transactional
+    public ScheduleResponse generate(Long areaId, LocalDate anyDayInWeek, boolean force) {
         LocalDate weekStart = DayOffService.weekStart(anyDayInWeek);
         accessPolicy.requireManagerOf(areaId);
         LocalDate today = LocalDate.now();
@@ -135,7 +145,7 @@ public class ScheduleService {
 
         boolean published = scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
                 .map(w -> w.getStatus() == ScheduleStatus.PUBLISHED).orElse(false);
-        if (requireRequests && !published) {
+        if (requireRequests && !published && !force) {
             List<String> missing = weekRequests.missingNames(areaId, weekStart);
             if (!missing.isEmpty()) {
                 throw new BusinessRuleException("Everyone needs a day-off request in before the schedule is made. "
@@ -507,6 +517,20 @@ public class ScheduleService {
         return toResponse(schedule);
     }
 
+    /**
+     * Throws the week's schedule away (draft or published) so it can be generated again from scratch. Days off,
+     * requests and reservations are kept; only the schedule (shifts, stores, edits made by hand) goes. When the new one
+     * is published, everyone gets their whole week again.
+     */
+    @Transactional
+    public void reset(Long scheduleId) {
+        WeeklySchedule schedule = getManaged(scheduleId);
+        org.slf4j.LoggerFactory.getLogger(ScheduleService.class).info("{} reset the schedule of {} for the week of {}",
+                accessPolicy.current().email(), schedule.getArea().getName(), schedule.getWeekStart());
+        scheduleRepository.delete(schedule);
+        scheduleRepository.flush();
+    }
+
     @Transactional
     public ScheduleResponse revertToDraft(Long scheduleId) {
         WeeklySchedule schedule = getManaged(scheduleId);
@@ -618,23 +642,37 @@ public class ScheduleService {
      */
     @Transactional(readOnly = true)
     public DayRoom dayRoom(Employee employee, LocalDate date, Collection<DayOffStatus> openStatuses) {
+        return dayRoom(employee, date, openStatuses, false);
+    }
+
+    /**
+     * Whether the stores can still be covered that day with this person off as well (see {@link Coverage}: primaries
+     * stay at their store, floaters only go to their stores and within each store's floater limit).
+     *
+     * @param reservedCanMove when true, other people's days that are only reserved (not approved) don't count as
+     *                        off: if this request is approved, their reservation moves to another day
+     */
+    public DayRoom dayRoom(Employee employee, LocalDate date, Collection<DayOffStatus> openStatuses,
+            boolean reservedCanMove) {
         Long areaId = employee.getArea() == null ? null : employee.getArea().getId();
         if (areaId == null) {
-            return new DayRoom(date, 0, 0, List.of(), false);
+            return new DayRoom(date, 0, 0, List.of(), false, List.of());
         }
-        int needed = storeRepository.findByAreaIdOrderByNameAsc(areaId).stream()
-                .filter(st -> st.isActive() && st.isOpenOn(date))
-                .mapToInt(Store::getMinStaffPerDay)
-                .sum();
+        List<Employee> staff = employeeRepository
+                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES);
+        Coverage coverage = Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff);
         Map<Long, String> asked = new LinkedHashMap<>();
         for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, date, openStatuses)) {
             Employee e = r.getEmployee();
+            if (reservedCanMove && r.isReserved() && r.getStatus() == DayOffStatus.PENDING) {
+                continue;
+            }
             if (e.isActive() && !e.getId().equals(employee.getId()) && SCHEDULED_ROLES.contains(e.getRole())) {
                 asked.put(e.getId(), e.getFirstName());
             }
         }
+        Set<Long> off = new HashSet<>(asked.keySet());
         Optional<WeeklySchedule> schedule = scheduleRepository.findByAreaIdAndWeekStart(areaId, DayOffService.weekStart(date));
-        int working;
         if (schedule.isPresent()) {
             List<ScheduleEntry> day = schedule.get().getEntries().stream()
                     .filter(en -> en.getWorkDate().equals(date) && en.getEmployee().isActive())
@@ -643,21 +681,20 @@ public class ScheduleService {
                     .anyMatch(en -> en.getEmployee().getId().equals(employee.getId()) && en.getType() == DayType.WORK);
             if (!meWorking && day.stream().anyMatch(en -> en.getEmployee().getId().equals(employee.getId()))) {
                 // Already off that day in the schedule: taking it as a requested day changes nobody's count.
-                return new DayRoom(date, needed, Integer.MAX_VALUE, List.copyOf(asked.values()), false);
+                return new DayRoom(date, coverage.needed(date), Integer.MAX_VALUE, List.copyOf(asked.values()), false,
+                        List.of());
             }
-            working = (int) day.stream()
-                    .filter(en -> en.getType() == DayType.WORK)
-                    .filter(en -> !en.getEmployee().getId().equals(employee.getId()))
-                    .filter(en -> !asked.containsKey(en.getEmployee().getId()))
-                    .count();
-        } else {
-            long staff = employeeRepository
-                    .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES).stream()
-                    .filter(e -> !e.getId().equals(employee.getId()))
-                    .count();
-            working = (int) (staff - asked.size());
+            // Others the schedule already has off that day.
+            day.stream().filter(en -> en.getType() != DayType.WORK && !en.getEmployee().getId().equals(employee.getId()))
+                    .forEach(en -> off.add(en.getEmployee().getId()));
         }
-        return new DayRoom(date, needed, working, List.copyOf(asked.values()), working < needed);
+        Set<Long> withMe = new HashSet<>(off);
+        withMe.add(employee.getId());
+        Coverage.Day before = coverage.day(date, off);
+        Coverage.Day after = coverage.day(date, withMe);
+        boolean full = after.shortBy() > before.shortBy();
+        return new DayRoom(date, after.needed(), after.working(), List.copyOf(asked.values()), full,
+                full ? after.shortStores() : List.of());
     }
 
     @Transactional(readOnly = true)

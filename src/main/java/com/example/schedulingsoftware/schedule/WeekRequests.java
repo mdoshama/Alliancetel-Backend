@@ -76,7 +76,24 @@ public class WeekRequests {
      */
     public record Status(LocalDate weekStart, int total, int sent, List<PersonStatus> missing,
             List<PersonStatus> denied, List<PersonStatus> fewer, List<PersonStatus> reserved,
-            List<PersonStatus> others, boolean requestsOpen) {
+            List<PersonStatus> others, boolean requestsOpen, Capacity capacity) {
+    }
+
+    /**
+     * The week at a glance: shifts the stores need (sum of each open store's minimum staffing, every day) against
+     * the shifts the team can work (each person's work days a week), and each day as it stands with the days off
+     * asked for so far (pending, reserved and approved).
+     */
+    public record Capacity(int shiftsNeeded, int shiftsAvailable, int daysOffToGive, List<DayCapacity> days) {
+
+        public int spare() {
+            return shiftsAvailable - shiftsNeeded;
+        }
+    }
+
+    /** One day: people working with the days off so far, and how many shifts the stores still can't fill. */
+    public record DayCapacity(LocalDate date, int needed, int working, int off, int shortBy,
+            List<String> shortStores) {
     }
 
     /**
@@ -102,7 +119,46 @@ public class WeekRequests {
                 .filter(p -> p.state() == State.PENDING || p.state() == State.APPROVED)
                 .filter(p -> p.stillNeeded() == 0).toList();
         return new Status(week, people.size(), people.size() - missing.size() - reserved.size(), missing, denied,
-                fewer, reserved, others, portal.isOpenFor(week));
+                fewer, reserved, others, portal.isOpenFor(week), capacity(areaId, week));
+    }
+
+    /** See {@link Capacity}. */
+    @Transactional(readOnly = true)
+    public Capacity capacity(Long areaId, LocalDate anyDayInWeek) {
+        LocalDate week = DayOffService.weekStart(anyDayInWeek);
+        Coverage coverage = coverage(areaId);
+        Map<LocalDate, Set<Long>> off = offByDate(requests(areaId, week));
+        int needed = 0;
+        int available = 0;
+        int toGive = 0;
+        for (Employee e : coverage.staff()) {
+            available += Math.min(7, Math.max(0, e.getWorkDaysPerWeek()));
+            toGive += Math.max(0, 7 - e.getWorkDaysPerWeek());
+        }
+        List<DayCapacity> days = new ArrayList<>();
+        for (LocalDate d : week.datesUntil(week.plusDays(7)).toList()) {
+            Set<Long> o = off.getOrDefault(d, Set.of());
+            Coverage.Day day = coverage.day(d, o);
+            needed += day.needed();
+            days.add(new DayCapacity(d, day.needed(), day.working(), o.size(), day.shortBy(), day.shortStores()));
+        }
+        return new Capacity(needed, available, toGive, days);
+    }
+
+    /** Coverage for the area's stores and staff (see {@link Coverage}). */
+    @Transactional(readOnly = true)
+    public Coverage coverage(Long areaId) {
+        return Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff(areaId));
+    }
+
+    private static Map<LocalDate, Set<Long>> offByDate(List<DayOffRequest> requests) {
+        Map<LocalDate, Set<Long>> off = new HashMap<>();
+        for (DayOffRequest r : requests) {
+            if (r.getStatus() != DayOffStatus.REJECTED) {
+                off.computeIfAbsent(r.getOffDate(), k -> new HashSet<>()).add(r.getEmployee().getId());
+            }
+        }
+        return off;
     }
 
     /** Names of people who haven't sent a request for the week (used to hold back generating it). */
@@ -142,21 +198,14 @@ public class WeekRequests {
         List<LocalDate> dates = week.datesUntil(week.plusDays(7)).toList();
         List<Employee> staff = staff(areaId);
         List<DayOffRequest> requests = requests(areaId, week);
-        List<Store> stores = storeRepository.findByAreaIdOrderByNameAsc(areaId).stream().filter(Store::isActive)
-                .toList();
+        Coverage coverage = Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff);
 
-        Map<LocalDate, Integer> needed = new HashMap<>();
-        for (LocalDate d : dates) {
-            needed.put(d, stores.stream().filter(s -> s.isOpenOn(d)).mapToInt(s -> Math.max(0, s.getMinStaffPerDay()))
-                    .sum());
-        }
-        Map<LocalDate, Integer> off = new HashMap<>();
+        Map<LocalDate, Set<Long>> off = offByDate(requests);
         Map<Long, Set<LocalDate>> storeOff = new HashMap<>();
         Map<Long, Set<LocalDate>> asked = new HashMap<>();
         for (DayOffRequest r : requests) {
             asked.computeIfAbsent(r.getEmployee().getId(), k -> new HashSet<>()).add(r.getOffDate());
             if (r.getStatus() != DayOffStatus.REJECTED) {
-                off.merge(r.getOffDate(), 1, Integer::sum);
                 Store home = r.getEmployee().getHomeStore();
                 if (home != null) {
                     storeOff.computeIfAbsent(home.getId(), k -> new HashSet<>()).add(r.getOffDate());
@@ -166,29 +215,52 @@ public class WeekRequests {
 
         Map<Long, PersonStatus> statuses = people(staff, requests).stream()
                 .collect(Collectors.toMap(PersonStatus::employeeId, p -> p));
-        List<Suggestion> result = new ArrayList<>();
-        // Primaries first (fewest good days for them), then by name.
+        // Most constrained first: the people with the fewest days the stores can spare them (a primary tied to one
+        // store, a floater with only a couple of stores), so everyone still gets a day that works.
+        Map<Long, Long> freeDays = new HashMap<>();
+        for (Employee e : staff) {
+            freeDays.put(e.getId(), dates.stream()
+                    .filter(d -> !asked.getOrDefault(e.getId(), Set.of()).contains(d))
+                    .filter(d -> coverage.canBeOff(d, off.getOrDefault(d, Set.of()), e.getId())).count());
+        }
         List<Employee> ordered = staff.stream()
-                .filter(e -> needsDayOff(e))
+                .filter(WeekRequests::needsDayOff)
                 .filter(e -> statuses.get(e.getId()).stillNeeded() > 0)
-                .sorted(Comparator.comparing((Employee e) -> !e.isPrimaryAtStore()).thenComparing(Employee::getLastName)
+                .sorted(Comparator.comparing((Employee e) -> freeDays.get(e.getId()))
+                        .thenComparing(e -> !e.isPrimaryAtStore())
+                        .thenComparing(Employee::getLastName)
                         .thenComparing(Employee::getFirstName))
                 .toList();
+        List<Suggestion> result = new ArrayList<>();
         for (Employee e : ordered) {
             Long home = e.getHomeStore() == null ? null : e.getHomeStore().getId();
             PersonStatus st = statuses.get(e.getId());
             int need = st.stillNeeded();
             Set<LocalDate> taken = new HashSet<>(asked.getOrDefault(e.getId(), Set.of()));
             for (int k = 1; k <= need; k++) {
+                Map<LocalDate, Coverage.Day> without = new HashMap<>();
+                Map<LocalDate, Boolean> fits = new HashMap<>();
+                for (LocalDate d : dates) {
+                    if (taken.contains(d)) {
+                        continue;
+                    }
+                    Set<Long> o = off.getOrDefault(d, Set.of());
+                    Set<Long> plus = new HashSet<>(o);
+                    plus.add(e.getId());
+                    Coverage.Day after = coverage.day(d, plus);
+                    without.put(d, after);
+                    fits.put(d, after.shortBy() <= coverage.day(d, o).shortBy());
+                }
                 List<LocalDate> options = dates.stream()
                         .filter(d -> !taken.contains(d))
                         .sorted(Comparator
-                                // A day nobody else at their store is off first.
-                                .comparing((LocalDate d) -> home != null
-                                        && storeOff.getOrDefault(home, Set.of()).contains(d))
-                                // Then the day with the most people to spare.
-                                .thenComparing(d -> -(staff.size() - off.getOrDefault(d, 0) - needed.get(d)))
-                                .thenComparing(d -> off.getOrDefault(d, 0))
+                                // Days the stores can still be covered without them first.
+                                .comparing((LocalDate d) -> !fits.get(d))
+                                // Then a day nobody else at their store is off.
+                                .thenComparing(d -> home != null && storeOff.getOrDefault(home, Set.of()).contains(d))
+                                // Then the day with the most people to spare once they're off.
+                                .thenComparing(d -> -without.get(d).spare())
+                                .thenComparing(d -> off.getOrDefault(d, Set.of()).size())
                                 .thenComparing(d -> d))
                         .toList();
                 if (options.isEmpty()) {
@@ -196,23 +268,25 @@ public class WeekRequests {
                 }
                 LocalDate pick = options.getFirst();
                 boolean clash = home != null && storeOff.getOrDefault(home, Set.of()).contains(pick);
+                boolean ok = fits.get(pick);
                 taken.add(pick);
-                off.merge(pick, 1, Integer::sum);
+                off.computeIfAbsent(pick, x -> new HashSet<>()).add(e.getId());
                 if (home != null) {
                     storeOff.computeIfAbsent(home, x -> new HashSet<>()).add(pick);
                 }
-                int spare = staff.size() - off.get(pick) - needed.get(pick);
+                Coverage.Day after = without.get(pick);
                 String why = switch (st.state()) {
                     case MISSING -> "No request sent.";
                     case DENIED -> "Their request was turned down.";
+                    case RESERVED -> "Reserved, not picked yet.";
                     default -> "Asked for " + st.daysOffAsked() + " of their " + st.daysOffNeeded() + " days off.";
                 };
                 String usual = st.daysOffNeeded() > 1 ? " Takes " + st.daysOffNeeded() + " days off a week." : "";
                 String reason = why + usual + " "
-                        + (spare >= 0 ? spare + " more than the stores need that day"
-                                : "The stores are short that day even so")
+                        + (ok ? "Stores still covered that day (" + Math.max(0, after.spare()) + " to spare)"
+                                : "The stores are short that day even so ("
+                                        + String.join(", ", after.shortStores()) + ")")
                         + (clash ? "; someone else from their store is also off" : "") + ".";
-                // Days left to give, counting from the ones they already have.
                 result.add(new Suggestion(e.getId(), e.getFullName(),
                         e.getHomeStore() == null ? null : e.getHomeStore().getName(), st.state(), pick, options,
                         reason, st.daysOffAsked() + k, st.daysOffNeeded()));

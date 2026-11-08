@@ -42,6 +42,10 @@ public class RequestPortal {
     }
 
     @Transactional
+    public RequestPortalSetting save(RequestPortalSetting setting) {
+        return repository.save(setting);
+    }
+
     public RequestPortalSetting setMode(PortalMode mode, String by) {
         RequestPortalSetting s = repository.findById(RequestPortalSetting.ID).orElseGet(RequestPortalSetting::new);
         s.setMode(mode);

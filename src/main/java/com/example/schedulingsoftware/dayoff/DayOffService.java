@@ -158,6 +158,10 @@ public class DayOffService {
         // People asking for themselves (not admins) follow the weekly window and the emergency limit; a manager
         // entering a request for someone else, or an admin, can make exceptions.
         boolean selfService = !user.isAdmin() && employee.getId().equals(user.id());
+        boolean override = Boolean.TRUE.equals(request.override());
+        if (override && (user.isEmployee() || employee.getId().equals(user.id()))) {
+            throw new AccessDeniedException("Only a manager or admin can give someone else a day off directly.");
+        }
         if (selfService && !emergency && requestWindow) {
             checkWindow(dates);
         }
@@ -169,7 +173,8 @@ public class DayOffService {
         for (java.util.Iterator<LocalDate> it = dates.iterator(); it.hasNext();) {
             LocalDate date = it.next();
             DayOffRequest existing = repository.findByEmployeeIdAndOffDate(employee.getId(), date).orElse(null);
-            if (existing != null && existing.isReserved() && existing.getStatus() != DayOffStatus.REJECTED) {
+            if (existing != null && existing.isReserved() && existing.getStatus() != DayOffStatus.REJECTED
+                    && !override) {
                 // Now their own request; still waiting for a manager unless one already approved it.
                 existing.setReserved(false);
                 existing.setReason(InputRules.clean(request.reason()));
@@ -188,12 +193,22 @@ public class DayOffService {
             if (date.isBefore(today)) {
                 throw new BusinessRuleException("Cannot request a day off in the past (" + date + ").");
             }
-            if (repository.existsByEmployeeIdAndOffDate(employee.getId(), date)) {
+            if (override) {
+                DayOffRequest existing = repository.findByEmployeeIdAndOffDate(employee.getId(), date).orElse(null);
+                if (existing != null && existing.getStatus() == DayOffStatus.APPROVED) {
+                    throw new BusinessRuleException(employee.getFullName() + " already has " + dayName(date) + " off.");
+                }
+                if (existing != null) {
+                    // Their pending (or reserved, or turned-down) request for that day becomes this one.
+                    repository.delete(existing);
+                    repository.flush();
+                }
+            } else if (repository.existsByEmployeeIdAndOffDate(employee.getId(), date)) {
                 throw new BusinessRuleException(employee.getFullName() + " already has a request for " + date + ".");
             }
             requestedPerWeek.merge(weekStart(date), 1, Integer::sum);
         }
-        if (!emergency) {
+        if (!emergency && !override) {
             requestedPerWeek.forEach((monday, count) -> {
                 long existing = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
                         employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
@@ -222,8 +237,8 @@ public class DayOffService {
             // The whole area: never accept more days off than the stores can spare that day (other people's reserved
             // days can move, so they don't count against it).
             for (LocalDate date : dates) {
-                DayRoom room = scheduleService.dayRoom(employee, date, OPEN_STATUSES);
-                if (room.full() && room.working() + reservedOthersOn(employee, date).size() < room.needed()) {
+                DayRoom room = scheduleService.dayRoom(employee, date, OPEN_STATUSES, true);
+                if (room.full()) {
                     throw new BusinessRuleException(fullDayMessage(room));
                 }
             }
@@ -238,8 +253,14 @@ public class DayOffService {
             r.setEmergency(emergency);
             saved.add(repository.save(r));
         }
-        // Requests wait for a manager or admin. Their reserved day stays until one is approved (then it's given back).
         List<DayOffResponse> created = new ArrayList<>(confirmed);
+        if (override) {
+            // A manager or admin decided: approved now (their reserved day that week is given back).
+            String note = "Given by " + user.fullName() + ".";
+            saved.forEach(r -> created.add(approve(r.getId(), note)));
+            return created;
+        }
+        // Requests wait for a manager or admin. Their reserved day stays until one is approved (then it's given back).
         saved.forEach(r -> created.add(DayOffResponse.from(r)));
         return created;
     }
@@ -396,7 +417,7 @@ public class DayOffService {
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
             LocalDate date = d;
             if (result.stream().noneMatch(t -> t.date().equals(date))
-                    && scheduleService.dayRoom(employee, date, OPEN_STATUSES).full()) {
+                    && scheduleService.dayRoom(employee, date, OPEN_STATUSES, true).full()) {
                 result.add(TakenDay.full(date));
             }
         }
@@ -419,10 +440,13 @@ public class DayOffService {
 
     private static String fullDayMessage(DayRoom room) {
         String who = room.offNames().isEmpty() ? ""
-                : " (" + String.join(", ", room.offNames()) + (room.offNames().size() == 1 ? " is" : " are") + " already off)";
-        return dayName(room.date()) + " is full: the stores need " + room.needed() + " people that day and only "
-                + Math.max(0, room.working()) + " others would be working" + who + ". Pick another day, or send an "
-                + "emergency request if it's urgent.";
+                : " " + String.join(", ", room.offNames()) + (room.offNames().size() == 1 ? " is" : " are") + " already off.";
+        int shortBy = Math.max(1, room.needed() - Math.max(0, room.working()));
+        return dayName(room.date()) + " is full: the stores need " + room.needed() + " people that day and the others "
+                + "working can't cover them all, so a store would be short" + (room.working() < room.needed()
+                        ? " by " + shortBy : "")
+                + ". Primaries stay at their store and floaters only cover the stores assigned to them." + who
+                + " Pick another day, or send an emergency request if it's urgent.";
     }
 
     private static String dayName(LocalDate date) {

@@ -16,7 +16,11 @@ public final class ScheduleDtos {
     private ScheduleDtos() {
     }
 
-    public record GenerateScheduleRequest(@NotNull Long areaId, @NotNull LocalDate weekStart) {
+    public record GenerateScheduleRequest(@NotNull Long areaId, @NotNull LocalDate weekStart, Boolean force) {
+
+        public GenerateScheduleRequest(Long areaId, LocalDate weekStart) {
+            this(areaId, weekStart, null);
+        }
     }
 
     /** Change one day: its type, and for work days the store (null keeps the current one, or the home store). */
@@ -130,7 +134,8 @@ public final class ScheduleDtos {
      * @param offNames others already off or asking (first names)
      * @param full    true when this day off would leave the area short
      */
-    public record DayRoom(LocalDate date, int needed, int working, List<String> offNames, boolean full) {
+    public record DayRoom(LocalDate date, int needed, int working, List<String> offNames, boolean full,
+            List<String> shortStores) {
     }
 
     public record Shortage(String storeName, LocalDate date, int scheduled, int required) {

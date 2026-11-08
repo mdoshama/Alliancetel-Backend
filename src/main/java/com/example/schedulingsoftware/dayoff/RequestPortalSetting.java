@@ -33,4 +33,7 @@ public class RequestPortalSetting {
     private String changedBy;
 
     private Instant changedAt;
+
+    /** When reserved days the system once approved by itself were put back to pending (done once). */
+    private Instant reservedApprovalsUndoneAt;
 }

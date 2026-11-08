@@ -22,7 +22,16 @@ public final class DayOffDtos {
             @NotEmpty @Size(max = 7, message = "can have at most 7 days") List<@NotNull LocalDate> dates,
             @Size(max = 255) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG) String reason,
             /** Urgent: allowed even if a colleague at the same store is off, and outside the weekly limit. */
-            Boolean emergency) {
+            Boolean emergency,
+            /**
+             * Managers and admins only, for someone else: give the day(s) off now, approved, skipping the usual
+             * checks (full day, same store, weekly limit, request window).
+             */
+            Boolean override) {
+
+        public CreateDayOffRequest(Long employeeId, List<LocalDate> dates, String reason, Boolean emergency) {
+            this(employeeId, dates, reason, emergency, null);
+        }
     }
 
     /** A day someone at the same store already has off (pending or approved), so a normal request can't take it. */

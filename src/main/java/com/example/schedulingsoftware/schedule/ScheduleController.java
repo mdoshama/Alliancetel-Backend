@@ -67,7 +67,7 @@ public class ScheduleController {
 
     @PostMapping("/generate")
     public ScheduleResponse generate(@Valid @RequestBody GenerateScheduleRequest request) {
-        return scheduleService.generate(request.areaId(), request.weekStart());
+        return scheduleService.generate(request.areaId(), request.weekStart(), Boolean.TRUE.equals(request.force()));
     }
 
     @PatchMapping("/{scheduleId}/entries/{entryId}")
@@ -119,6 +119,13 @@ public class ScheduleController {
     @PostMapping("/{scheduleId}/publish")
     public ScheduleResponse publish(@PathVariable Long scheduleId) {
         return scheduleService.publish(scheduleId);
+    }
+
+    /** Throws the week's schedule away so it can be generated again from scratch. */
+    @org.springframework.web.bind.annotation.DeleteMapping("/{scheduleId}")
+    public ResponseEntity<Void> reset(@PathVariable Long scheduleId) {
+        scheduleService.reset(scheduleId);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{scheduleId}/revert-to-draft")

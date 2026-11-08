@@ -1,5 +1,6 @@
 package com.example.schedulingsoftware.dayoff;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -75,9 +76,45 @@ public class DayOffReservations {
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
     @Transactional
     public void onStartup() {
+        undoSelfApprovedReservations();
         if (backgroundJobs) {
             scheduled();
         }
+    }
+
+    /**
+     * An earlier version approved reserved days by itself. Once, those (today on, in weeks not yet published) go back
+     * to pending and become work days again on the schedule, so only a manager or admin approves days off.
+     *
+     * @return how many were put back to pending
+     */
+    @Transactional
+    public int undoSelfApprovedReservations() {
+        RequestPortalSetting setting = portal.setting();
+        if (setting.getReservedApprovalsUndoneAt() != null) {
+            return 0;
+        }
+        int n = 0;
+        for (DayOffRequest r : repository.findByReservedTrueAndStatusAndOffDateGreaterThanEqual(DayOffStatus.APPROVED,
+                portal.today())) {
+            Employee e = r.getEmployee();
+            if (r.getDecisionChangedAt() != null
+                    || published(e.getArea() == null ? null : e.getArea().getId(), DayOffService.weekStart(r.getOffDate()))) {
+                continue;
+            }
+            r.setStatus(DayOffStatus.PENDING);
+            r.setReviewedAt(null);
+            r.setReviewNote(null);
+            repository.flush();
+            scheduleService.revokeApprovedDayOff(e, r.getOffDate());
+            n++;
+        }
+        setting.setReservedApprovalsUndoneAt(Instant.now());
+        portal.save(setting);
+        if (n > 0) {
+            log.info("Put {} reserved day(s) the system had approved back to pending", n);
+        }
+        return n;
     }
 
     /** @return how many days were reserved */
