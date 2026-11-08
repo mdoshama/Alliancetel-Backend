@@ -271,7 +271,7 @@ public class EmployeeService {
         // shouldn't fail because of that).
         boolean alreadyPrimaryHere = employee.getId() != null && employee.isActive() && employee.isPrimaryAtStore()
                 && employee.getHomeStore() != null && employee.getHomeStore().getId().equals(request.homeStoreId());
-        if (request.role() != Role.ADMIN && request.areaId() == null) {
+        if ((request.role() == Role.MANAGER || request.role() == Role.EMPLOYEE) && request.areaId() == null) {
             throw new BusinessRuleException("Managers and employees must be assigned to an area.");
         }
         if (employee.getId() != null && employee.getId().equals(accessPolicy.current().id())

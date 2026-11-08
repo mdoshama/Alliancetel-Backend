@@ -28,6 +28,10 @@ public record CurrentUser(
         return role == Role.EMPLOYEE;
     }
 
+    public boolean isBackOffice() {
+        return role == Role.BACK_OFFICE;
+    }
+
     public static Optional<CurrentUser> find() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof CurrentUser user) {

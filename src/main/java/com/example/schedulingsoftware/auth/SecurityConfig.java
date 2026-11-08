@@ -36,6 +36,7 @@ public class SecurityConfig {
 
     private static final String ADMIN = "ADMIN";
     private static final String MANAGER = "MANAGER";
+    private static final String BACK_OFFICE = "BACK_OFFICE";
 
     private final JwtService jwtService;
     private final EmployeeRepository employeeRepository;
@@ -99,6 +100,9 @@ public class SecurityConfig {
                                 .hasAnyRole(ADMIN, MANAGER)
                         .requestMatchers("/api/eod/**").authenticated()
 
+                        // Time clock: back office (and admins) clock people in and out; managers look at their area.
+                        .requestMatchers("/api/time-clock/**").hasAnyRole(ADMIN, MANAGER, BACK_OFFICE)
+
                         // Everyone can read a schedule (employees only once published); managers build them.
                         .requestMatchers(HttpMethod.GET, "/api/schedules/**").authenticated()
                         .requestMatchers("/api/schedules/**").hasAnyRole(ADMIN, MANAGER)
@@ -111,7 +115,8 @@ public class SecurityConfig {
                                 writeProblem(res, HttpStatus.FORBIDDEN, "You don't have permission to do that.")))
                 .addFilterBefore(new JwtAuthenticationFilter(jwtService, employeeRepository, revokedTokenRepository),
                         UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(new PasswordChangeRequiredFilter(), JwtAuthenticationFilter.class);
+                .addFilterAfter(new PasswordChangeRequiredFilter(), JwtAuthenticationFilter.class)
+                .addFilterAfter(new BackOfficeFilter(), PasswordChangeRequiredFilter.class);
         return http.build();
     }
 

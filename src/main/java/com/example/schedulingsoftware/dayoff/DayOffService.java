@@ -55,6 +55,8 @@ public class DayOffService {
     /** At most one emergency request per calendar month. */
     private final boolean oneEmergencyPerMonth;
     private final java.time.ZoneId zone;
+    private final DayOffReservations reservations;
+    private final RequestPortal portal;
 
     public DayOffService(DayOffRequestRepository repository,
             EmployeeService employeeService,
@@ -64,7 +66,11 @@ public class DayOffService {
             @Value("${alliancetel.scheduling.max-day-off-requests-per-week:2}") int maxPerWeek,
             @Value("${alliancetel.scheduling.request-window:true}") boolean requestWindow,
             @Value("${alliancetel.scheduling.one-emergency-per-month:true}") boolean oneEmergencyPerMonth,
-            @Value("${alliancetel.scheduling.zone:America/Los_Angeles}") String zone) {
+            @Value("${alliancetel.scheduling.zone:America/Los_Angeles}") String zone,
+            DayOffReservations reservations,
+            RequestPortal portal) {
+        this.reservations = reservations;
+        this.portal = portal;
         this.requestWindow = requestWindow;
         this.oneEmergencyPerMonth = oneEmergencyPerMonth;
         this.zone = java.time.ZoneId.of(zone);
@@ -158,6 +164,22 @@ public class DayOffService {
         if (selfService && emergency && oneEmergencyPerMonth) {
             checkEmergencyLimit(employee, dates);
         }
+        // Asking for a day that is already reserved for them just keeps it (now as their own choice).
+        List<DayOffResponse> confirmed = new ArrayList<>();
+        for (java.util.Iterator<LocalDate> it = dates.iterator(); it.hasNext();) {
+            LocalDate date = it.next();
+            DayOffRequest existing = repository.findByEmployeeIdAndOffDate(employee.getId(), date).orElse(null);
+            if (existing != null && existing.isReserved()) {
+                existing.setReserved(false);
+                existing.setReason(InputRules.clean(request.reason()));
+                existing.setReviewNote("You picked the day that was reserved for you.");
+                confirmed.add(DayOffResponse.from(existing));
+                it.remove();
+            }
+        }
+        if (dates.isEmpty()) {
+            return confirmed;
+        }
         Map<LocalDate, Integer> requestedPerWeek = new LinkedHashMap<>();
         for (LocalDate date : dates) {
             if (date.isAfter(today.plusYears(1))) {
@@ -173,7 +195,7 @@ public class DayOffService {
         }
         if (!emergency) {
             requestedPerWeek.forEach((monday, count) -> {
-                long existing = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalse(
+                long existing = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
                         employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
                 if (existing + count > maxPerWeek) {
                     throw new BusinessRuleException("At most " + maxPerWeek + " days off can be requested in one week "
@@ -181,35 +203,55 @@ public class DayOffService {
                             + "emergency request.");
                 }
             });
-            // One person off per store per day, so the store's primary and secondary are never both away.
-            List<TakenDay> taken = sameStoreDays(employee, dates.first(), dates.last()).stream()
-                    .filter(t -> dates.contains(t.date()))
-                    .toList();
-            if (!taken.isEmpty()) {
-                TakenDay t = taken.getFirst();
-                throw new BusinessRuleException(t.takenBy() + " already has " + dayName(t.date()) + " off at "
-                        + employee.getHomeStore().getName() + ". Only one person per store can be off on a day. "
-                        + "For something urgent, send an emergency request.");
+            // One person off per store per day, so the store's primary and secondary are never both away. A day the
+            // system only reserved for a colleague doesn't block the request: if a manager approves it, the colleague's
+            // reservation moves to another day.
+            if (employee.getHomeStore() != null) {
+                DayOffRequest real = repository.findSameStore(employee.getHomeStore().getId(), employee.getId(),
+                        dates.first(), dates.last(), OPEN_STATUSES).stream()
+                        .filter(r -> dates.contains(r.getOffDate()) && !r.isReserved())
+                        .findFirst().orElse(null);
+                if (real != null) {
+                    throw new BusinessRuleException(real.getEmployee().getFirstName() + " already has "
+                            + dayName(real.getOffDate()) + " off at " + employee.getHomeStore().getName()
+                            + ". Only one person per store can be off on a day. "
+                            + "For something urgent, send an emergency request.");
+                }
             }
-            // The whole area: never accept more days off than the stores can spare that day.
+            // The whole area: never accept more days off than the stores can spare that day (other people's reserved
+            // days can move, so they don't count against it).
             for (LocalDate date : dates) {
                 DayRoom room = scheduleService.dayRoom(employee, date, OPEN_STATUSES);
-                if (room.full()) {
+                if (room.full() && room.working() + reservedOthersOn(employee, date).size() < room.needed()) {
                     throw new BusinessRuleException(fullDayMessage(room));
                 }
             }
         }
 
-        List<DayOffResponse> created = new ArrayList<>();
+        List<DayOffRequest> saved = new ArrayList<>();
         for (LocalDate date : dates) {
             DayOffRequest r = new DayOffRequest();
             r.setEmployee(employee);
             r.setOffDate(date);
             r.setReason(InputRules.clean(request.reason()));
             r.setEmergency(emergency);
-            created.add(DayOffResponse.from(repository.save(r)));
+            saved.add(repository.save(r));
         }
+        // Requests wait for a manager or admin. Their reserved day stays until one is approved (then it's given back).
+        List<DayOffResponse> created = new ArrayList<>(confirmed);
+        saved.forEach(r -> created.add(DayOffResponse.from(r)));
         return created;
+    }
+
+    /** Days the system reserved for other people in the area on this date. */
+    private List<DayOffRequest> reservedOthersOn(Employee employee, LocalDate date) {
+        Long area = areaOf(employee);
+        if (area == null) {
+            return List.of();
+        }
+        return repository.findForAreaOnDate(area, date, List.of(DayOffStatus.APPROVED)).stream()
+                .filter(r -> r.isReserved() && !r.getEmployee().getId().equals(employee.getId()))
+                .toList();
     }
 
     /**
@@ -251,33 +293,57 @@ public class DayOffService {
      * nine days before it starts and close at the end of the Friday before it (company time zone).
      */
     public DayOffDtos.RequestWindow window() {
-        LocalDate today = LocalDate.now(zone);
-        LocalDate open = openWeek(today);
+        LocalDate today = portal.today();
+        LocalDate open = RequestPortal.openWeek(today);
+        RequestPortalSetting setting = portal.setting();
+        List<LocalDate> weeks = RequestPortal.openWeeks(setting.getMode(), today);
         return new DayOffDtos.RequestWindow(requestWindow, open, open.plusDays(6), open.minusDays(3),
                 open.plusDays(7).minusDays(9), oneEmergencyPerMonth,
-                oneEmergencyPerMonth && emergencyUsed(accessPolicy.current().id(), today));
+                oneEmergencyPerMonth && emergencyUsed(accessPolicy.current().id(), today), setting.getMode(), weeks,
+                setting.getChangedBy(), setting.getChangedAt(), reservations.isEnabled());
+    }
+
+    /** Admins: opens or closes the request portal, or puts it back on the normal Friday cycle. */
+    @Transactional
+    public DayOffDtos.RequestWindow setPortal(PortalMode mode) {
+        CurrentUser user = accessPolicy.current();
+        if (!user.isAdmin()) {
+            throw new AccessDeniedException("Only admins can open or close day-off requests.");
+        }
+        portal.setMode(mode, user.fullName());
+        if (mode != PortalMode.CLOSED) {
+            reservations.reserveUpcoming();
+        }
+        return window();
     }
 
     /** Monday of the week open for requests: next week until Friday, the week after from Saturday. */
     static LocalDate openWeek(LocalDate today) {
-        int ahead = today.getDayOfWeek().getValue() >= DayOfWeek.SATURDAY.getValue() ? 2 : 1;
-        return weekStart(today).plusWeeks(ahead);
+        return RequestPortal.openWeek(today);
     }
 
     private void checkWindow(java.util.Collection<LocalDate> dates) {
-        LocalDate today = LocalDate.now(zone);
-        LocalDate open = openWeek(today);
+        LocalDate today = portal.today();
+        PortalMode mode = portal.mode();
+        if (mode == PortalMode.CLOSED) {
+            throw new BusinessRuleException("Day-off requests are closed right now. For something urgent, send an "
+                    + "emergency request, or ask your manager.");
+        }
+        List<LocalDate> open = RequestPortal.openWeeks(mode, today);
         for (LocalDate date : dates) {
             LocalDate week = weekStart(date);
-            if (week.isBefore(open)) {
+            if (open.contains(week)) {
+                continue;
+            }
+            LocalDate first = open.getFirst();
+            LocalDate last = open.getLast();
+            if (week.isBefore(first)) {
                 throw new BusinessRuleException("Requests for the week of " + shortDate(week) + " closed on Friday, "
                         + shortDate(week.minusDays(3)) + ". For something urgent, send an emergency request.");
             }
-            if (week.isAfter(open)) {
-                throw new BusinessRuleException("Right now you can only ask for days off in the week of "
-                        + shortDate(open) + "–" + shortDate(open.plusDays(6)) + ". Requests for the week of "
-                        + shortDate(week) + " open on Saturday, " + shortDate(week.minusDays(9)) + ".");
-            }
+            throw new BusinessRuleException("Right now you can only ask for days off in the week of "
+                    + shortDate(first) + "–" + shortDate(last.plusDays(6)) + ". Requests for the week of "
+                    + shortDate(week) + " open on Saturday, " + shortDate(week.minusDays(9)) + ".");
         }
     }
 
@@ -341,8 +407,10 @@ public class DayOffService {
         if (employee.getHomeStore() == null) {
             return List.of();
         }
+        // A colleague's reserved day isn't shown as taken: asking for it moves their reservation to another day.
         return repository.findSameStore(employee.getHomeStore().getId(), employee.getId(), from, to, OPEN_STATUSES)
                 .stream()
+                .filter(r -> !r.isReserved())
                 .map(r -> new TakenDay(r.getOffDate(), r.getEmployee().getFirstName(), r.getStatus()))
                 .toList();
     }
@@ -364,10 +432,39 @@ public class DayOffService {
     @Transactional
     public DayOffResponse approve(Long id, String note) {
         DayOffResponse approved = review(id, DayOffStatus.APPROVED, note);
-        // If that week's schedule was already made, the person must not stay scheduled to work that day.
         DayOffRequest r = get(id);
-        notifier.dayOffDecided(r, true, r.getReviewNote());
-        return approved.withScheduleUpdate(scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate()));
+        Employee e = r.getEmployee();
+        LocalDate date = r.getOffDate();
+        // Reserved days of others give way to an approved request: a colleague at the same store, and others in the
+        // area if the stores would otherwise be short that day. They get another day reserved.
+        List<DayOffRequest> aside = new ArrayList<>();
+        if (e.getHomeStore() != null) {
+            repository.findSameStore(e.getHomeStore().getId(), e.getId(), date, date, OPEN_STATUSES).stream()
+                    .filter(DayOffRequest::isReserved).forEach(aside::add);
+        }
+        aside.forEach(reservations::moveAside);
+        for (DayOffRequest other : reservedOthersOn(e, date)) {
+            if (!scheduleService.dayRoom(e, date, OPEN_STATUSES).full()) {
+                break;
+            }
+            aside.add(other);
+            reservations.moveAside(other);
+        }
+        // If that week's schedule was already made, the person must not stay scheduled to work that day.
+        String update = scheduleService.applyApprovedDayOff(e, date);
+        // Their own reserved day(s) that week go back to work.
+        List<LocalDate> released = reservations.trim(e, date);
+        String message = r.getReviewNote();
+        if (!released.isEmpty()) {
+            String back = "Your reserved day off on "
+                    + String.join(" and ", released.stream().map(DayOffService::dayName).toList())
+                    + " is now a work day.";
+            message = message == null ? back : message + " " + back;
+        }
+        notifier.dayOffDecided(r, true, message);
+        repository.flush();
+        aside.forEach(o -> reservations.refill(o.getEmployee(), o.getOffDate()));
+        return approved.withScheduleUpdate(update);
     }
 
     /**
@@ -414,6 +511,7 @@ public class DayOffService {
         DayOffResponse rejected = review(id, DayOffStatus.REJECTED, note);
         DayOffRequest r = get(id);
         notifier.dayOffDecided(r, false, r.getReviewNote());
+        reservations.refill(r.getEmployee(), r.getOffDate());
         return rejected;
     }
 
@@ -460,6 +558,11 @@ public class DayOffService {
                 ? scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate())
                 : scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate());
         notifier.dayOffDecisionChanged(r, newStatus == DayOffStatus.APPROVED, why);
+        if (newStatus == DayOffStatus.APPROVED) {
+            reservations.trim(r.getEmployee(), r.getOffDate());
+        } else {
+            reservations.refill(r.getEmployee(), r.getOffDate());
+        }
         return DayOffResponse.from(r).withScheduleUpdate(update);
     }
 
@@ -475,7 +578,11 @@ public class DayOffService {
         if (r.getStatus() != DayOffStatus.PENDING) {
             throw new BusinessRuleException("Only pending requests can be cancelled.");
         }
+        Employee e = r.getEmployee();
+        LocalDate date = r.getOffDate();
         repository.delete(r);
+        repository.flush();
+        reservations.refill(e, date);
     }
 
     private DayOffResponse review(Long id, DayOffStatus newStatus, String note) {

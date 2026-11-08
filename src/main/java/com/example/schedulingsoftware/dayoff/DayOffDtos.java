@@ -40,7 +40,14 @@ public final class DayOffDtos {
      * @param emergencyUsedThisMonth the signed-in person already has an emergency request this month
      */
     public record RequestWindow(boolean enabled, LocalDate weekStart, LocalDate weekEnd, LocalDate deadline,
-            LocalDate nextOpens, boolean oneEmergencyPerMonth, boolean emergencyUsedThisMonth) {
+            LocalDate nextOpens, boolean oneEmergencyPerMonth, boolean emergencyUsedThisMonth,
+            /** AUTO (Friday cycle), OPEN or CLOSED by an admin, who changed it last and when. */
+            PortalMode mode, List<LocalDate> openWeeks, String changedBy, java.time.Instant changedAt,
+            /** Days off are reserved for everyone when a week opens. */
+            boolean reservations) {
+    }
+
+    public record PortalRequest(@NotNull PortalMode mode) {
     }
 
     /** Days off a manager gives (e.g. from the suggestions), approved straight away. */
@@ -110,12 +117,14 @@ public final class DayOffDtos {
             String decisionChangeReason,
             Instant decisionChangedAt,
             /** After approval: how that week's existing schedule was updated, or null if there was none. */
-            String scheduleUpdate) {
+            String scheduleUpdate,
+            /** Reserved by the system; gives way when they ask for another day. */
+            boolean reserved) {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, update);
+                    decisionChangeReason, decisionChangedAt, update, reserved);
         }
 
         public static DayOffResponse from(DayOffRequest r) {
@@ -139,7 +148,8 @@ public final class DayOffDtos {
                     r.getDecisionChangedBy(),
                     r.getDecisionChangeReason(),
                     r.getDecisionChangedAt(),
-                    null);
+                    null,
+                    r.isReserved());
         }
     }
 }

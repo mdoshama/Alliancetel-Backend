@@ -42,6 +42,7 @@ public class WeekRequests {
     private final DayOffRequestRepository dayOffRepository;
     private final StoreRepository storeRepository;
     private final AccessPolicy accessPolicy;
+    private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
 
     /** Where someone stands for the week. */
     public enum State {
@@ -52,7 +53,9 @@ public class WeekRequests {
         /** Has an approved day off. */
         APPROVED,
         /** Every request this week was turned down. */
-        DENIED
+        DENIED,
+        /** Hasn't asked for anything; has the days the system reserved. */
+        RESERVED
     }
 
     /**
@@ -72,7 +75,8 @@ public class WeekRequests {
      * @param fewer people who asked, but for fewer days than they normally take off (e.g. 1 of their 2)
      */
     public record Status(LocalDate weekStart, int total, int sent, List<PersonStatus> missing,
-            List<PersonStatus> denied, List<PersonStatus> fewer, List<PersonStatus> others) {
+            List<PersonStatus> denied, List<PersonStatus> fewer, List<PersonStatus> reserved,
+            List<PersonStatus> others, boolean requestsOpen) {
     }
 
     /**
@@ -90,11 +94,15 @@ public class WeekRequests {
         List<PersonStatus> people = people(areaId, week);
         List<PersonStatus> missing = people.stream().filter(p -> p.state() == State.MISSING).toList();
         List<PersonStatus> denied = people.stream().filter(p -> p.state() == State.DENIED).toList();
+        List<PersonStatus> reserved = people.stream().filter(p -> p.state() == State.RESERVED).toList();
         List<PersonStatus> fewer = people.stream()
-                .filter(p -> p.state() != State.MISSING && p.state() != State.DENIED && p.stillNeeded() > 0).toList();
+                .filter(p -> p.state() == State.PENDING || p.state() == State.APPROVED)
+                .filter(p -> p.stillNeeded() > 0).toList();
         List<PersonStatus> others = people.stream()
-                .filter(p -> p.state() != State.MISSING && p.state() != State.DENIED && p.stillNeeded() == 0).toList();
-        return new Status(week, people.size(), people.size() - missing.size(), missing, denied, fewer, others);
+                .filter(p -> p.state() == State.PENDING || p.state() == State.APPROVED)
+                .filter(p -> p.stillNeeded() == 0).toList();
+        return new Status(week, people.size(), people.size() - missing.size() - reserved.size(), missing, denied,
+                fewer, reserved, others, portal.isOpenFor(week));
     }
 
     /** Names of people who haven't sent a request for the week (used to hold back generating it). */
@@ -113,6 +121,23 @@ public class WeekRequests {
     @Transactional(readOnly = true)
     public List<Suggestion> suggest(Long areaId, LocalDate anyDayInWeek) {
         accessPolicy.requireManagerOf(areaId);
+        return suggestFor(areaId, anyDayInWeek);
+    }
+
+    /** People who only have reserved days (haven't asked for anything themselves). */
+    @Transactional(readOnly = true)
+    public List<String> reservedOnlyNames(Long areaId, LocalDate weekStart) {
+        return people(areaId, weekStart).stream().filter(p -> p.state() == State.RESERVED)
+                .map(PersonStatus::name).toList();
+    }
+
+    public Employee employee(Long id) {
+        return employeeRepository.findById(id).orElseThrow();
+    }
+
+    /** Same as {@link #suggest} without the access check (used to reserve days off). */
+    @Transactional(readOnly = true)
+    public List<Suggestion> suggestFor(Long areaId, LocalDate anyDayInWeek) {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
         List<LocalDate> dates = week.datesUntil(week.plusDays(7)).toList();
         List<Employee> staff = staff(areaId);
@@ -204,10 +229,12 @@ public class WeekRequests {
         Map<Long, List<DayOffRequest>> byPerson = requests.stream()
                 .collect(Collectors.groupingBy(r -> r.getEmployee().getId()));
         return staff.stream().filter(WeekRequests::needsDayOff).map(e -> {
-            List<DayOffRequest> mine = byPerson.getOrDefault(e.getId(), List.of());
+            List<DayOffRequest> all = byPerson.getOrDefault(e.getId(), List.of());
+            List<DayOffRequest> mine = all.stream().filter(r -> !r.isReserved()).toList();
+            boolean hasReserved = all.stream().anyMatch(DayOffRequest::isReserved);
             State state;
             if (mine.isEmpty()) {
-                state = State.MISSING;
+                state = hasReserved ? State.RESERVED : State.MISSING;
             } else if (mine.stream().anyMatch(r -> r.getStatus() == DayOffStatus.APPROVED)) {
                 state = State.APPROVED;
             } else if (mine.stream().anyMatch(r -> r.getStatus() == DayOffStatus.PENDING)) {
@@ -215,10 +242,11 @@ public class WeekRequests {
             } else {
                 state = State.DENIED;
             }
-            int asked = (int) mine.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).count();
+            int asked = (int) all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).count();
             return new PersonStatus(e.getId(), e.getFullName(),
                     e.getHomeStore() == null ? null : e.getHomeStore().getName(), state,
-                    mine.stream().map(DayOffRequest::getOffDate).sorted().toList(),
+                    all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
+                            .map(DayOffRequest::getOffDate).sorted().toList(),
                     Math.max(0, 7 - e.getWorkDaysPerWeek()), asked);
         }).toList();
     }

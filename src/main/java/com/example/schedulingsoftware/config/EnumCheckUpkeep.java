@@ -40,7 +40,8 @@ public class EnumCheckUpkeep implements ApplicationRunner {
     static final List<EnumColumn> COLUMNS = List.of(
             new EnumColumn("notifications", "channel", NotificationChannel.class),
             new EnumColumn("notifications", "kind", NotificationKind.class),
-            new EnumColumn("notifications", "status", NotificationStatus.class));
+            new EnumColumn("notifications", "status", NotificationStatus.class),
+            new EnumColumn("employees", "role", com.example.schedulingsoftware.employee.Role.class));
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;

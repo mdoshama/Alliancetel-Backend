@@ -72,6 +72,9 @@ alliancetel:
     one-emergency-per-month: ${ONE_EMERGENCY_PER_MONTH:true}
     # The week can't be generated until everyone has a day-off request in (or was given a day off).
     require-requests-before-generate: ${REQUIRE_REQUESTS_BEFORE_GENERATE:true}
+    # When a week opens for requests, everyone gets their usual days off reserved (1 for 6-day, 2 for 5-day staff);
+    # asking for another day swaps automatically when the stores can cover it.
+    reserve-days-off: ${RESERVE_DAYS_OFF:true}
     # The company's time zone, for "today" and the Friday deadline.
     zone: ${SCHEDULING_ZONE:America/Los_Angeles}
   # Birthday reminder emails to admins (everyone) and managers (their area), from each employee's birth date.

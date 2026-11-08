@@ -53,6 +53,14 @@ public class DayOffRequest {
     @org.hibernate.annotations.ColumnDefault("false")
     private boolean emergency;
 
+    /**
+     * Reserved by the system when the week opened for requests (everyone gets their usual days off up front). It is
+     * approved, and gives way automatically when the person asks for a different day.
+     */
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("false")
+    private boolean reserved;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DayOffStatus status = DayOffStatus.PENDING;

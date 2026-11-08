@@ -22,7 +22,8 @@ public class AccessPolicy {
      */
     public Long restrictToArea(Long requestedAreaId) {
         CurrentUser user = current();
-        if (user.isAdmin()) {
+        // Back office works across every area (and can only reach the Time Clock, see BackOfficeFilter).
+        if (user.isAdmin() || user.isBackOffice()) {
             return requestedAreaId;
         }
         if (requestedAreaId != null && !requestedAreaId.equals(user.areaId())) {

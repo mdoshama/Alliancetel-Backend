@@ -111,6 +111,8 @@ public class DemoDataSeeder implements ApplicationRunner {
     private void seed(String hash) {
         log.info("Empty database: seeding AllianceTel demo data");
         employeeRepository.save(employee("AT-0001", "Alex", "Morgan", "admin" + DEMO_DOMAIN, Role.ADMIN, null, hash));
+        employeeRepository.save(employee("AT-0002", "Bree", "Office", "backoffice" + DEMO_DOMAIN, Role.BACK_OFFICE, null,
+                hash));
 
         List<Area> areas = areaRepository.saveAll(List.of(
                 new Area("San Diego", "San Diego county stores"),

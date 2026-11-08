@@ -31,7 +31,16 @@ public interface DayOffRequestRepository
             Collection<DayOffStatus> statuses);
 
     /** Like the count above, but leaving out emergency requests (they don't use up the weekly limit). */
-    long countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalse(Long employeeId, LocalDate from, LocalDate to,
+    /** Reserved days in a range, latest first (the one given back first when they ask for another day). */
+    List<DayOffRequest> findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(Long employeeId,
+            LocalDate from, LocalDate to);
+
+    java.util.Optional<DayOffRequest> findByEmployeeIdAndOffDate(Long employeeId, LocalDate offDate);
+
+    long countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(Long employeeId, LocalDate from, LocalDate to,
+            java.util.Collection<DayOffStatus> statuses);
+
+    long countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(Long employeeId, LocalDate from, LocalDate to,
             Collection<DayOffStatus> statuses);
 
     /** Days off (in the given statuses) of other active people based at the same store, in a date range. */

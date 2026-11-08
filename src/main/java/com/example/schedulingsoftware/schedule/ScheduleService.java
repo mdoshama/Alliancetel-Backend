@@ -75,6 +75,7 @@ public class ScheduleService {
     private final StoreAssigner storeAssigner;
     private final ScheduleNotifier notifier;
     private final WeekRequests weekRequests;
+    private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
 
     /** Generating waits until everyone has sent their day-off request for the week (or been given a day off). */
     @org.springframework.beans.factory.annotation.Value("${alliancetel.scheduling.require-requests-before-generate:true}")
@@ -141,6 +142,18 @@ public class ScheduleService {
                         + "Still waiting for " + missing.size() + ": " + String.join(", ", missing.stream().limit(8).toList())
                         + (missing.size() > 8 ? " and " + (missing.size() - 8) + " more" : "")
                         + ". Use \"Suggest days off\" to give them a day.");
+            }
+            // While the week still takes requests, wait for people who haven't chosen (they have reserved days).
+            if (portal.isOpenFor(weekStart)) {
+                List<String> waiting = weekRequests.reservedOnlyNames(areaId, weekStart);
+                if (!waiting.isEmpty()) {
+                    throw new BusinessRuleException("Requests for this week are still open, and " + waiting.size()
+                            + (waiting.size() == 1 ? " person hasn't" : " people haven't") + " picked their days yet ("
+                            + String.join(", ", waiting.stream().limit(8).toList())
+                            + (waiting.size() > 8 ? " and " + (waiting.size() - 8) + " more" : "")
+                            + "; they have reserved days). Wait until requests close on Friday, or close requests "
+                            + "on the Day-off Requests page to generate now.");
+                }
             }
         }
 

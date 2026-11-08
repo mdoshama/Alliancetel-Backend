@@ -19,6 +19,7 @@ alliancetel:
     request-window: false
     one-emergency-per-month: false
     require-requests-before-generate: false
+    reserve-days-off: false
   demo-data:
     enabled: false
   # The WhatsApp sender is called directly in tests.
