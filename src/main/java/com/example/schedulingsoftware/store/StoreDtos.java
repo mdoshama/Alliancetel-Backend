@@ -36,12 +36,19 @@ public final class StoreDtos {
             /** Hex color like "#2563EB". Null keeps the current color (new stores get an unused palette color). */
             @Pattern(regexp = "^#[0-9a-fA-F]{6}$", message = "must be a color like #2563EB") String color,
             /** Sales tax in percent, e.g. 7.75. Null keeps the current rate (0 for a new store). */
-            @DecimalMin("0") @DecimalMax("30") @Digits(integer = 2, fraction = 3) BigDecimal taxRate) {
+            @DecimalMin("0") @DecimalMax("30") @Digits(integer = 2, fraction = 3) BigDecimal taxRate,
+            /** Most floaters auto-fill sends here on one day (0 = no limit). Null keeps the current limit. */
+            @Min(0) @Max(50) Integer maxFloatersPerDay) {
 
         /** Without a tax rate (keeps the current one). */
         public StoreRequest(Long areaId, String name, String code, String address, Integer minStaffPerDay,
                 Boolean active, List<DayHours> hours, String color) {
-            this(areaId, name, code, address, minStaffPerDay, active, hours, color, null);
+            this(areaId, name, code, address, minStaffPerDay, active, hours, color, null, null);
+        }
+
+        public StoreRequest(Long areaId, String name, String code, String address, Integer minStaffPerDay,
+                Boolean active, List<DayHours> hours, String color, BigDecimal taxRate) {
+            this(areaId, name, code, address, minStaffPerDay, active, hours, color, taxRate, null);
         }
     }
 
@@ -72,12 +79,15 @@ public final class StoreDtos {
             List<DayHours> hours,
             String color,
             /** Sales tax in percent. */
-            BigDecimal taxRate) {
+            BigDecimal taxRate,
+            /** Most floaters auto-fill sends here on one day; 0 = no limit. */
+            int maxFloatersPerDay) {
 
         public static StoreResponse from(Store s, long employeeCount) {
             return new StoreResponse(s.getId(), s.getArea().getId(), s.getArea().getName(), s.getName(), s.getCode(),
                     s.getLabel(), s.getAddress(), s.getMinStaffPerDay(), s.isActive(), employeeCount,
-                    DayHours.weekOf(s), s.getDisplayColor(), s.getTaxRate());
+                    DayHours.weekOf(s), s.getDisplayColor(), s.getTaxRate(),
+                    s.getMaxFloatersPerDay());
         }
     }
 }

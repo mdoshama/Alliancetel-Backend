@@ -35,6 +35,9 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
 
     boolean existsByHomeStoreId(Long storeId);
 
+    /** The active primary at a store other than the given person, if any (each store has at most one). */
+    Optional<Employee> findFirstByHomeStoreIdAndPrimaryAtStoreTrueAndActiveTrueAndIdNot(Long storeId, Long id);
+
     /** Active people with a birth date on file, for birthday lists and reminders. */
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = { "area", "homeStore" })
     List<Employee> findByActiveTrueAndBirthDateIsNotNull();

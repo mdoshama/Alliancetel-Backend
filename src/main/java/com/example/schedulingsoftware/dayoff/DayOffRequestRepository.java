@@ -14,6 +14,9 @@ public interface DayOffRequestRepository
 
     boolean existsByEmployeeIdAndOffDate(Long employeeId, LocalDate offDate);
 
+    boolean existsByEmployeeIdAndEmergencyTrueAndOffDateBetweenAndStatusIn(Long employeeId, LocalDate from,
+            LocalDate to, java.util.Collection<DayOffStatus> statuses);
+
     boolean existsByEmployeeIdAndOffDateAndStatus(Long employeeId, LocalDate offDate, DayOffStatus status);
 
     @Query("""

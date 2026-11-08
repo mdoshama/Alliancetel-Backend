@@ -20,7 +20,8 @@ import org.springframework.stereotype.Component;
  *   <li>Days a manager set by hand are kept exactly as they are.</li>
  *   <li>Everyone else starts at their home store.</li>
  *   <li>People without a home store go to the store furthest below its minimum (or, if none is short,
- *       the least-staffed store).</li>
+ *       the least-staffed store), skipping stores that already have their most floaters for the day.</li>
+ *   <li>Someone with a list of stores they float to is only ever sent to one of those (or their home store).</li>
  *   <li>While a store is still below its minimum, one person is moved in from a store that has more than its
  *       minimum (the "third person"). The donor store never drops below its own minimum, managers are never
  *       moved away from their store, primaries are never moved away from their store, floaters are moved
@@ -37,10 +38,14 @@ public class StoreAssigner {
      * A store that can be assigned, with its minimum people per day (0 = no minimum) and the dates it is closed.
      * Nobody is sent to a store on a day it is closed, and its minimum does not apply that day.
      */
-    public record StoreSlot(Long storeId, int minStaffPerDay, Set<LocalDate> closedDates) {
+    public record StoreSlot(Long storeId, int minStaffPerDay, Set<LocalDate> closedDates, int maxFloatersPerDay) {
 
         public StoreSlot(Long storeId, int minStaffPerDay) {
-            this(storeId, minStaffPerDay, Set.of());
+            this(storeId, minStaffPerDay, Set.of(), 0);
+        }
+
+        public StoreSlot(Long storeId, int minStaffPerDay, Set<LocalDate> closedDates) {
+            this(storeId, minStaffPerDay, closedDates, 0);
         }
 
         public StoreSlot {
@@ -66,6 +71,15 @@ public class StoreAssigner {
     }
 
     public Map<Object, Assignment> assign(List<StoreSlot> stores, List<WorkSlot> slots) {
+        return assign(stores, slots, Map.of());
+    }
+
+    /**
+     * @param floatStores per employee, the only stores they may be sent to besides their home store (missing or
+     *                    empty = any store)
+     */
+    public Map<Object, Assignment> assign(List<StoreSlot> stores, List<WorkSlot> slots,
+            Map<Long, Set<Long>> floatStores) {
         Map<Object, Assignment> result = new LinkedHashMap<>();
         Map<Long, Integer> movesPerEmployee = new HashMap<>();
         List<StoreSlot> sortedStores = stores.stream().sorted(Comparator.comparing(StoreSlot::storeId)).toList();
@@ -76,17 +90,31 @@ public class StoreAssigner {
         byDay.forEach((date, day) -> {
             // Only stores open that day take part.
             Map<Long, Integer> minimums = new LinkedHashMap<>();
+            Map<Long, Integer> floaterCaps = new HashMap<>();
             sortedStores.stream()
                     .filter(s -> !s.closedDates().contains(date))
-                    .forEach(s -> minimums.put(s.storeId(), Math.max(0, s.minStaffPerDay())));
-            assignDay(day, minimums, movesPerEmployee, result);
+                    .forEach(s -> {
+                        minimums.put(s.storeId(), Math.max(0, s.minStaffPerDay()));
+                        if (s.maxFloatersPerDay() > 0) {
+                            floaterCaps.put(s.storeId(), s.maxFloatersPerDay());
+                        }
+                    });
+            assignDay(day, minimums, floaterCaps, floatStores, movesPerEmployee, result);
         });
         return result;
     }
 
-    private void assignDay(List<WorkSlot> day, Map<Long, Integer> minimums, Map<Long, Integer> moves,
-            Map<Object, Assignment> result) {
+    private void assignDay(List<WorkSlot> day, Map<Long, Integer> minimums, Map<Long, Integer> floaterCaps,
+            Map<Long, Set<Long>> floatStores, Map<Long, Integer> moves, Map<Object, Assignment> result) {
+        java.util.function.BiPredicate<WorkSlot, Long> mayWorkAt = (s, storeId) -> {
+            Set<Long> allowed = floatStores.get(s.employeeId());
+            return allowed == null || allowed.isEmpty() || allowed.contains(storeId)
+                    || storeId.equals(s.homeStoreId());
+        };
         Map<Long, Integer> count = new HashMap<>();
+        Map<Long, Integer> floaters = new HashMap<>();
+        java.util.function.Predicate<Long> roomForFloater = id -> !floaterCaps.containsKey(id)
+                || floaters.getOrDefault(id, 0) < floaterCaps.get(id);
         minimums.keySet().forEach(id -> count.put(id, 0));
         Map<Object, Long> current = new HashMap<>();
         List<WorkSlot> movable = new ArrayList<>();
@@ -97,6 +125,9 @@ public class StoreAssigner {
             if (s.locked()) {
                 result.put(s.key(), new Assignment(s.lockedStoreId(), false));
                 count.computeIfPresent(s.lockedStoreId(), (k, v) -> v + 1);
+                if (s.homeStoreId() == null && s.lockedStoreId() != null) {
+                    floaters.merge(s.lockedStoreId(), 1, Integer::sum); // A manager's choice still counts.
+                }
             } else if (s.homeStoreId() != null && minimums.containsKey(s.homeStoreId())) {
                 current.put(s.key(), s.homeStoreId());
                 count.merge(s.homeStoreId(), 1, Integer::sum);
@@ -108,10 +139,33 @@ public class StoreAssigner {
 
         // People without a usable home store go where they are needed most.
         for (WorkSlot s : homeless) {
-            Long target = neediestStore(minimums, count);
+            boolean floater = s.homeStoreId() == null;
+            // Only the stores they may work at; among those, ones with room for another floater.
+            Map<Long, Integer> mine = new LinkedHashMap<>();
+            minimums.forEach((id, min) -> {
+                if (mayWorkAt.test(s, id)) {
+                    mine.put(id, min);
+                }
+            });
+            Map<Long, Integer> allowed = mine;
+            if (floater) {
+                allowed = new LinkedHashMap<>();
+                for (var m : mine.entrySet()) {
+                    if (roomForFloater.test(m.getKey())) {
+                        allowed.put(m.getKey(), m.getValue());
+                    }
+                }
+                if (allowed.isEmpty()) {
+                    allowed = mine; // Their stores all have their most floaters: still place them at one.
+                }
+            }
+            Long target = neediestStore(allowed, count);
             current.put(s.key(), target);
             if (target != null) {
                 count.merge(target, 1, Integer::sum);
+                if (floater) {
+                    floaters.merge(target, 1, Integer::sum);
+                }
                 movable.add(s);
             }
         }
@@ -127,6 +181,10 @@ public class StoreAssigner {
                     .filter(s -> !shortStore.equals(current.get(s.key())))
                     .filter(s -> current.get(s.key()) != null)
                     .filter(s -> count.get(current.get(s.key())) > minimums.get(current.get(s.key())))
+                    // A floater only goes to a store that can take another floater that day.
+                    .filter(s -> s.homeStoreId() != null || roomForFloater.test(shortStore))
+                    // Only to a store they may work at.
+                    .filter(s -> mayWorkAt.test(s, shortStore))
                     // Floaters are moved before secondaries, then whoever has been moved least.
                     .min(Comparator.<WorkSlot, Boolean>comparing(s -> s.homeStoreId() != null)
                             .thenComparingInt(s -> moves.getOrDefault(s.employeeId(), 0))
@@ -139,6 +197,10 @@ public class StoreAssigner {
             Long from = current.get(donor.key());
             count.merge(from, -1, Integer::sum);
             count.merge(shortStore, 1, Integer::sum);
+            if (donor.homeStoreId() == null) {
+                floaters.merge(from, -1, Integer::sum);
+                floaters.merge(shortStore, 1, Integer::sum);
+            }
             current.put(donor.key(), shortStore);
             moves.merge(donor.employeeId(), 1, Integer::sum);
         }

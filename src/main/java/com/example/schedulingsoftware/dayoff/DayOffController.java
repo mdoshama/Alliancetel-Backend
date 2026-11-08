@@ -75,6 +75,12 @@ public class DayOffController {
     }
 
     /** Days a colleague at the same store already has off, so the request form can show them as taken. */
+    /** The week people can ask for now and its Friday deadline. */
+    @GetMapping("/window")
+    public DayOffDtos.RequestWindow window() {
+        return dayOffService.window();
+    }
+
     @GetMapping("/taken-days")
     public List<TakenDay> takenDays(@RequestParam Long employeeId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,

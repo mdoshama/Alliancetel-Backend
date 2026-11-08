@@ -74,6 +74,11 @@ public class ScheduleService {
     private final StoreRepository storeRepository;
     private final StoreAssigner storeAssigner;
     private final ScheduleNotifier notifier;
+    private final WeekRequests weekRequests;
+
+    /** Generating waits until everyone has sent their day-off request for the week (or been given a day off). */
+    @org.springframework.beans.factory.annotation.Value("${alliancetel.scheduling.require-requests-before-generate:true}")
+    private boolean requireRequests;
 
     @Transactional
     public Optional<ScheduleResponse> find(Long areaId, LocalDate anyDayInWeek) {
@@ -127,6 +132,18 @@ public class ScheduleService {
             throw new BusinessRuleException("Area '" + area.getName() + "' is inactive.");
         }
 
+        boolean published = scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
+                .map(w -> w.getStatus() == ScheduleStatus.PUBLISHED).orElse(false);
+        if (requireRequests && !published) {
+            List<String> missing = weekRequests.missingNames(areaId, weekStart);
+            if (!missing.isEmpty()) {
+                throw new BusinessRuleException("Everyone needs a day-off request in before the schedule is made. "
+                        + "Still waiting for " + missing.size() + ": " + String.join(", ", missing.stream().limit(8).toList())
+                        + (missing.size() > 8 ? " and " + (missing.size() - 8) + " more" : "")
+                        + ". Use \"Suggest days off\" to give them a day.");
+            }
+        }
+
         WeeklySchedule schedule = scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
                 .orElseGet(() -> {
                     WeeklySchedule s = new WeeklySchedule();
@@ -137,7 +154,6 @@ public class ScheduleService {
         if (schedule.getStatus() == ScheduleStatus.PUBLISHED) {
             throw new BusinessRuleException("This week is already published. Revert it to draft before regenerating.");
         }
-
         // Remove old rows first so the unique (schedule, employee, date) constraint is not hit on re-insert.
         schedule.getEntries().clear();
         schedule.setDraftSavedAt(null);
@@ -889,7 +905,8 @@ public class ScheduleService {
     private Eval evaluate(Map<Long, Sim> plan, List<Store> stores, List<LocalDate> dates) {
         List<StoreAssigner.StoreSlot> storeSlots = stores.stream()
                 .map(s -> new StoreAssigner.StoreSlot(s.getId(), s.getMinStaffPerDay(),
-                        dates.stream().filter(d -> !s.isOpenOn(d)).collect(Collectors.toSet())))
+                        dates.stream().filter(d -> !s.isOpenOn(d)).collect(Collectors.toSet()),
+                        s.getMaxFloatersPerDay()))
                 .toList();
         List<StoreAssigner.WorkSlot> slots = new ArrayList<>();
         Map<LocalDate, Integer> working = new HashMap<>();
@@ -909,7 +926,9 @@ public class ScheduleService {
             });
         }
         Map<String, Integer> count = new HashMap<>();
-        storeAssigner.assign(storeSlots, slots).forEach((key, a) -> {
+        Map<Long, Set<Long>> floatStores = new HashMap<>();
+        employeeRepository.findAllById(plan.keySet()).forEach(e -> floatStores.put(e.getId(), e.floatStoreIds()));
+        storeAssigner.assign(storeSlots, slots, floatStores).forEach((key, a) -> {
             if (a.storeId() != null) {
                 String day = ((String) key).substring(((String) key).indexOf('|') + 1);
                 count.merge(a.storeId() + "|" + day, 1, Integer::sum);
@@ -946,7 +965,8 @@ public class ScheduleService {
         List<StoreAssigner.StoreSlot> stores = areaStores.stream()
                 .filter(Store::isActive)
                 .map(s -> new StoreAssigner.StoreSlot(s.getId(), s.getMinStaffPerDay(),
-                        weekDates(schedule).stream().filter(d -> !s.isOpenOn(d)).collect(Collectors.toSet())))
+                        weekDates(schedule).stream().filter(d -> !s.isOpenOn(d)).collect(Collectors.toSet()),
+                        s.getMaxFloatersPerDay()))
                 .toList();
         Map<Long, Store> storesById = new HashMap<>();
         areaStores.forEach(s -> storesById.put(s.getId(), s));
@@ -977,7 +997,10 @@ public class ScheduleService {
                     home == null ? null : home.getId(), e.getEmployee().isAnchoredToStore() || coverForPrimary,
                     e.isManuallyEdited(), e.getStore() == null ? null : e.getStore().getId()));
         }
-        storeAssigner.assign(stores, slots).forEach((key, assignment) -> {
+        Map<Long, Set<Long>> floatStores = new HashMap<>();
+        schedule.getEntries().forEach(en -> floatStores.computeIfAbsent(en.getEmployee().getId(),
+                k -> en.getEmployee().floatStoreIds()));
+        storeAssigner.assign(stores, slots, floatStores).forEach((key, assignment) -> {
             ScheduleEntry e = (ScheduleEntry) key;
             if (!e.isManuallyEdited()) {
                 e.setStore(assignment.storeId() == null ? null : storesById.get(assignment.storeId()));
@@ -1100,7 +1123,8 @@ public class ScheduleService {
                     Store home = e.getHomeStore();
                     return new EmployeeRow(e.getId(), e.getEmployeeCode(), e.getFullName(), e.getRole(),
                             home == null ? null : home.getId(), home == null ? null : home.getName(),
-                            hideStoreRoles ? null : e.getStoreRole(), e.getWorkDaysPerWeek(), working, cells);
+                            hideStoreRoles ? null : e.getStoreRole(), e.getWorkDaysPerWeek(), working, cells,
+                            hideStoreRoles ? List.of() : List.copyOf(e.floatStoreIds()));
                 })
                 .sorted(Comparator.comparing((EmployeeRow r) -> r.role() == Role.MANAGER ? 0 : 1)
                         .thenComparing(EmployeeRow::employeeName))

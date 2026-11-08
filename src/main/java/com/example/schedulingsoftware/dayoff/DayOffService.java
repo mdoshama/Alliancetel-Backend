@@ -50,13 +50,24 @@ public class DayOffService {
     private final ScheduleService scheduleService;
     private final ScheduleNotifier notifier;
     private final int maxPerWeek;
+    /** Weekly request window: people ask for next week's days off by Friday (company time zone). */
+    private final boolean requestWindow;
+    /** At most one emergency request per calendar month. */
+    private final boolean oneEmergencyPerMonth;
+    private final java.time.ZoneId zone;
 
     public DayOffService(DayOffRequestRepository repository,
             EmployeeService employeeService,
             AccessPolicy accessPolicy,
             ScheduleService scheduleService,
             ScheduleNotifier notifier,
-            @Value("${alliancetel.scheduling.max-day-off-requests-per-week:2}") int maxPerWeek) {
+            @Value("${alliancetel.scheduling.max-day-off-requests-per-week:2}") int maxPerWeek,
+            @Value("${alliancetel.scheduling.request-window:true}") boolean requestWindow,
+            @Value("${alliancetel.scheduling.one-emergency-per-month:true}") boolean oneEmergencyPerMonth,
+            @Value("${alliancetel.scheduling.zone:America/Los_Angeles}") String zone) {
+        this.requestWindow = requestWindow;
+        this.oneEmergencyPerMonth = oneEmergencyPerMonth;
+        this.zone = java.time.ZoneId.of(zone);
         this.repository = repository;
         this.employeeService = employeeService;
         this.accessPolicy = accessPolicy;
@@ -138,6 +149,15 @@ public class DayOffService {
         boolean emergency = Boolean.TRUE.equals(request.emergency());
 
         // Group the requested dates by week (Monday) so the weekly limit is checked per week.
+        // People asking for themselves (not admins) follow the weekly window and the emergency limit; a manager
+        // entering a request for someone else, or an admin, can make exceptions.
+        boolean selfService = !user.isAdmin() && employee.getId().equals(user.id());
+        if (selfService && !emergency && requestWindow) {
+            checkWindow(dates);
+        }
+        if (selfService && emergency && oneEmergencyPerMonth) {
+            checkEmergencyLimit(employee, dates);
+        }
         Map<LocalDate, Integer> requestedPerWeek = new LinkedHashMap<>();
         for (LocalDate date : dates) {
             if (date.isAfter(today.plusYears(1))) {
@@ -190,6 +210,96 @@ public class DayOffService {
             created.add(DayOffResponse.from(repository.save(r)));
         }
         return created;
+    }
+
+    /**
+     * Gives days off chosen by a manager (the suggested days off): each becomes an approved request with a note,
+     * the schedule is updated if the week was already made, and the person is told. Skips the request rules:
+     * this is the manager deciding.
+     */
+    @Transactional
+    public List<DayOffResponse> assignDaysOff(Long areaId, List<DayOffDtos.AssignedDay> items) {
+        accessPolicy.requireManagerOf(areaId);
+        List<DayOffResponse> result = new ArrayList<>();
+        for (DayOffDtos.AssignedDay item : items) {
+            Employee e = employeeService.getEmployee(item.employeeId());
+            if (e.getArea() == null || !areaId.equals(e.getArea().getId()) || !e.isActive()) {
+                throw new BusinessRuleException(e.getFullName() + " isn't active in this area.");
+            }
+            if (item.date().isBefore(LocalDate.now(zone))) {
+                throw new BusinessRuleException("Can't give a day off in the past (" + item.date() + ").");
+            }
+            if (repository.existsByEmployeeIdAndOffDate(e.getId(), item.date())) {
+                throw new BusinessRuleException(e.getFullName() + " already has a request for " + dayName(item.date())
+                        + ". Pick another day.");
+            }
+            DayOffRequest r = new DayOffRequest();
+            r.setEmployee(e);
+            r.setOffDate(item.date());
+            r.setReason("Day off given by your manager");
+            repository.save(r);
+            int perWeek = Math.max(1, 7 - e.getWorkDaysPerWeek());
+            result.add(approve(r.getId(), perWeek > 1
+                    ? "You take " + perWeek + " days off a week, so your manager picked this one for you."
+                    : "No day-off request came in, so your manager picked this day for you."));
+        }
+        return result;
+    }
+
+    /**
+     * The week people can ask for right now, and its Friday deadline. Each week's requests open on the Saturday
+     * nine days before it starts and close at the end of the Friday before it (company time zone).
+     */
+    public DayOffDtos.RequestWindow window() {
+        LocalDate today = LocalDate.now(zone);
+        LocalDate open = openWeek(today);
+        return new DayOffDtos.RequestWindow(requestWindow, open, open.plusDays(6), open.minusDays(3),
+                open.plusDays(7).minusDays(9), oneEmergencyPerMonth,
+                oneEmergencyPerMonth && emergencyUsed(accessPolicy.current().id(), today));
+    }
+
+    /** Monday of the week open for requests: next week until Friday, the week after from Saturday. */
+    static LocalDate openWeek(LocalDate today) {
+        int ahead = today.getDayOfWeek().getValue() >= DayOfWeek.SATURDAY.getValue() ? 2 : 1;
+        return weekStart(today).plusWeeks(ahead);
+    }
+
+    private void checkWindow(java.util.Collection<LocalDate> dates) {
+        LocalDate today = LocalDate.now(zone);
+        LocalDate open = openWeek(today);
+        for (LocalDate date : dates) {
+            LocalDate week = weekStart(date);
+            if (week.isBefore(open)) {
+                throw new BusinessRuleException("Requests for the week of " + shortDate(week) + " closed on Friday, "
+                        + shortDate(week.minusDays(3)) + ". For something urgent, send an emergency request.");
+            }
+            if (week.isAfter(open)) {
+                throw new BusinessRuleException("Right now you can only ask for days off in the week of "
+                        + shortDate(open) + "–" + shortDate(open.plusDays(6)) + ". Requests for the week of "
+                        + shortDate(week) + " open on Saturday, " + shortDate(week.minusDays(9)) + ".");
+            }
+        }
+    }
+
+    private void checkEmergencyLimit(Employee employee, java.util.Collection<LocalDate> dates) {
+        for (LocalDate date : dates) {
+            if (emergencyUsed(employee.getId(), date)) {
+                throw new BusinessRuleException("You've already used your emergency request for "
+                        + date.getMonth().getDisplayName(java.time.format.TextStyle.FULL, Locale.US)
+                        + ". Only one is allowed each month; please talk to your manager.");
+            }
+        }
+    }
+
+    /** Whether they already have an emergency request (pending or approved) in the month of this date. */
+    private boolean emergencyUsed(Long employeeId, LocalDate anyDayInMonth) {
+        LocalDate first = anyDayInMonth.withDayOfMonth(1);
+        return repository.existsByEmployeeIdAndEmergencyTrueAndOffDateBetweenAndStatusIn(employeeId, first,
+                first.plusMonths(1).minusDays(1), OPEN_STATUSES);
+    }
+
+    private static String shortDate(LocalDate d) {
+        return d.getMonth().getDisplayName(java.time.format.TextStyle.SHORT, Locale.US) + " " + d.getDayOfMonth();
     }
 
     /**

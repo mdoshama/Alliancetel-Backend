@@ -14,6 +14,11 @@ alliancetel:
     bcrypt-strength: 4
   scheduling:
     max-day-off-requests-per-week: 2
+    # Older tests make requests for any week and generate without everyone's request; the tests for these rules
+    # switch them on.
+    request-window: false
+    one-emergency-per-month: false
+    require-requests-before-generate: false
   demo-data:
     enabled: false
   # The WhatsApp sender is called directly in tests.

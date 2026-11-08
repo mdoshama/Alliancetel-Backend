@@ -68,6 +68,16 @@ public class Employee {
     @JoinColumn(name = "home_store_id")
     private Store homeStore;
 
+    /**
+     * The stores auto-fill may send this person to when they float or cover (other than their home store). Empty
+     * means any store in their area.
+     */
+    @jakarta.persistence.ManyToMany(fetch = FetchType.LAZY)
+    @jakarta.persistence.JoinTable(name = "employee_float_stores",
+            joinColumns = @JoinColumn(name = "employee_id"),
+            inverseJoinColumns = @JoinColumn(name = "store_id"))
+    private java.util.Set<Store> floatStores = new java.util.HashSet<>();
+
     /** Primary at the home store: never moved away automatically. Ignored without a home store. */
     @Column(nullable = false)
     @org.hibernate.annotations.ColumnDefault("false")
@@ -154,6 +164,13 @@ public class Employee {
             return StoreRole.FLOATER;
         }
         return primaryAtStore ? StoreRole.PRIMARY : StoreRole.SECONDARY;
+    }
+
+    /** Ids of the stores they may float to; empty = any store in the area. */
+    public java.util.Set<Long> floatStoreIds() {
+        java.util.Set<Long> ids = new java.util.TreeSet<>();
+        floatStores.forEach(s -> ids.add(s.getId()));
+        return ids;
     }
 
     /** Primaries and managers stay at their home store unless a manager moves them by hand. */

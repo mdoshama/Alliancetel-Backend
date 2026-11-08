@@ -145,7 +145,7 @@ public class EmployeeService {
         String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (employeeRepository.existsByEmployeeCodeIgnoreCase(code)) {
-            throw new BusinessRuleException("Employee code '" + code + "' is already in use.");
+            throw new BusinessRuleException("NTID '" + code + "' is already in use.");
         }
         if (employeeRepository.existsByEmailIgnoreCase(email)) {
             throw new BusinessRuleException("Email '" + email + "' is already in use.");
@@ -166,7 +166,7 @@ public class EmployeeService {
         String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (employeeRepository.existsByEmployeeCodeIgnoreCaseAndIdNot(code, id)) {
-            throw new BusinessRuleException("Employee code '" + code + "' is already in use.");
+            throw new BusinessRuleException("NTID '" + code + "' is already in use.");
         }
         if (employeeRepository.existsByEmailIgnoreCaseAndIdNot(email, id)) {
             throw new BusinessRuleException("Email '" + email + "' is already in use.");
@@ -202,12 +202,21 @@ public class EmployeeService {
         Employee employee = getEmployee(id);
         Long areaId = employee.getArea() == null ? null : employee.getArea().getId();
         accessPolicy.requireManagerOf(areaId);
+        Long before = employee.getHomeStore() == null ? null : employee.getHomeStore().getId();
+        boolean wasPrimary = employee.isPrimaryAtStore();
         employee.setHomeStore(storeId == null ? null : storeService.requireAssignable(storeId, areaId));
         if (primary != null) {
             employee.setPrimaryAtStore(primary);
+        } else if (employee.isPrimaryAtStore() && storeId != null && !storeId.equals(before)
+                && otherPrimary(employee) != null) {
+            // Moved to a store that already has its primary: they join it as a secondary.
+            employee.setPrimaryAtStore(false);
         }
         if (employee.getHomeStore() == null) {
             employee.setPrimaryAtStore(false); // Floaters are never primary.
+        }
+        if (!(wasPrimary && java.util.Objects.equals(before, storeId))) {
+            requireOnePrimary(employee);
         }
         return EmployeeResponse.from(employee);
     }
@@ -258,6 +267,10 @@ public class EmployeeService {
     }
 
     private void apply(Employee employee, EmployeeRequest request, String code, String email) {
+        // Someone who already is the active primary here stays so (older data may have two; editing other details
+        // shouldn't fail because of that).
+        boolean alreadyPrimaryHere = employee.getId() != null && employee.isActive() && employee.isPrimaryAtStore()
+                && employee.getHomeStore() != null && employee.getHomeStore().getId().equals(request.homeStoreId());
         if (request.role() != Role.ADMIN && request.areaId() == null) {
             throw new BusinessRuleException("Managers and employees must be assigned to an area.");
         }
@@ -290,6 +303,18 @@ public class EmployeeService {
             employee.setPrimaryAtStore(false);
         }
         employee.setWorkDaysPerWeek(request.workDaysPerWeek());
+        if (request.floatStoreIds() != null) {
+            java.util.Set<com.example.schedulingsoftware.store.Store> stores = new java.util.HashSet<>();
+            for (Long storeId : new java.util.LinkedHashSet<>(request.floatStoreIds())) {
+                stores.add(storeService.requireAssignable(storeId, request.areaId()));
+            }
+            employee.getFloatStores().clear();
+            employee.getFloatStores().addAll(stores);
+        } else if (employee.getArea() != null && !employee.getFloatStores().isEmpty()) {
+            // Moved to another area: stores from the old area no longer apply.
+            Long area = employee.getArea().getId();
+            employee.getFloatStores().removeIf(st -> st.getArea() == null || !area.equals(st.getArea().getId()));
+        }
         employee.setBirthDate(checkBirthDate(request.birthDate()));
         if (request.whatsappOptIn() != null) {
             if (request.whatsappOptIn() && employee.getPhone() == null) {
@@ -306,8 +331,33 @@ public class EmployeeService {
         if (request.active() != null) {
             employee.setActive(request.active());
         }
+        if (!alreadyPrimaryHere) {
+            requireOnePrimary(employee);
+        }
         if (endSessions) {
             employee.endAllSessions();
+        }
+    }
+
+    /** The other active primary at this person's home store, or null. */
+    private Employee otherPrimary(Employee employee) {
+        if (employee.getHomeStore() == null) {
+            return null;
+        }
+        return employeeRepository.findFirstByHomeStoreIdAndPrimaryAtStoreTrueAndActiveTrueAndIdNot(
+                employee.getHomeStore().getId(), employee.getId() == null ? -1L : employee.getId()).orElse(null);
+    }
+
+    /** Each store has one primary at most: making a second one is refused (make the current one secondary first). */
+    private void requireOnePrimary(Employee employee) {
+        if (!employee.isActive() || !employee.isPrimaryAtStore()) {
+            return;
+        }
+        Employee other = otherPrimary(employee);
+        if (other != null) {
+            throw new BusinessRuleException(other.getFullName() + " is already the primary at "
+                    + employee.getHomeStore().getName() + ". A store has only one primary: make "
+                    + other.getFirstName() + " a secondary first.");
         }
     }
 }

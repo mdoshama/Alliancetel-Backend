@@ -71,6 +71,11 @@ public class Store {
     @ColumnDefault("1")
     private int minStaffPerDay = 1;
 
+    /** Most floaters (people without a home store) auto-fill sends here on one day. 0 = no limit. */
+    @Column(nullable = false)
+    @ColumnDefault("0")
+    private int maxFloatersPerDay;
+
     @Column(nullable = false)
     private boolean active = true;
 

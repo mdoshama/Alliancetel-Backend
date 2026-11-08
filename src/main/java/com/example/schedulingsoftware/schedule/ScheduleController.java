@@ -1,6 +1,7 @@
 package com.example.schedulingsoftware.schedule;
 
 import java.time.LocalDate;
+import java.util.List;
 
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +31,29 @@ import lombok.RequiredArgsConstructor;
 public class ScheduleController {
 
     private final ScheduleService scheduleService;
+    private final WeekRequests weekRequests;
+    private final com.example.schedulingsoftware.dayoff.DayOffService dayOffService;
+
+    /** Managers: who has sent their day-off request for the week, who hasn't, and who was turned down. */
+    @GetMapping("/requests")
+    public WeekRequests.Status requestStatus(@RequestParam Long areaId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return weekRequests.status(areaId, weekStart);
+    }
+
+    /** Managers: a suggested day off for everyone without a request (or whose request was turned down). */
+    @PostMapping("/requests/suggest")
+    public List<WeekRequests.Suggestion> suggest(@RequestParam Long areaId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return weekRequests.suggest(areaId, weekStart);
+    }
+
+    /** Managers: gives the chosen suggested days off (approved, and each person is told). */
+    @PostMapping("/requests/apply")
+    public List<com.example.schedulingsoftware.dayoff.DayOffDtos.DayOffResponse> applySuggestions(
+            @Valid @RequestBody com.example.schedulingsoftware.dayoff.DayOffDtos.AssignDaysOffRequest request) {
+        return dayOffService.assignDaysOff(request.areaId(), request.items());
+    }
 
     /** Returns 204 when no schedule has been generated for that area and week yet. */
     @GetMapping

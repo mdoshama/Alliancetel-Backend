@@ -65,6 +65,15 @@ alliancetel:
   scheduling:
     # How many day-off requests one employee may have (pending + approved) in a single Mon-Sun week
     max-day-off-requests-per-week: ${MAX_DAY_OFF_PER_WEEK:2}
+    # People ask for next week's days off by the end of Friday (the following week opens on Saturday). Emergency
+    # requests skip this; managers entering a request for someone else and admins can make exceptions.
+    request-window: ${DAY_OFF_REQUEST_WINDOW:true}
+    # One emergency request per person per calendar month.
+    one-emergency-per-month: ${ONE_EMERGENCY_PER_MONTH:true}
+    # The week can't be generated until everyone has a day-off request in (or was given a day off).
+    require-requests-before-generate: ${REQUIRE_REQUESTS_BEFORE_GENERATE:true}
+    # The company's time zone, for "today" and the Friday deadline.
+    zone: ${SCHEDULING_ZONE:America/Los_Angeles}
   # Birthday reminder emails to admins (everyone) and managers (their area), from each employee's birth date.
   birthdays:
     reminders-enabled: ${BIRTHDAY_REMINDERS_ENABLED:true}

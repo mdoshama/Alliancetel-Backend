@@ -30,6 +30,27 @@ public final class DayOffDtos {
      * A day that a normal request can't have: a colleague at the same store is off (takenBy, status), or the area
      * has nobody to spare (full = true, takenBy null).
      */
+    /**
+     * The weekly request window for the day-off page.
+     *
+     * @param enabled            whether the window applies (people asking for themselves; emergencies are exempt)
+     * @param weekStart          Monday of the week people can ask for now
+     * @param deadline           the Friday it closes
+     * @param nextOpens          the Saturday the following week opens
+     * @param emergencyUsedThisMonth the signed-in person already has an emergency request this month
+     */
+    public record RequestWindow(boolean enabled, LocalDate weekStart, LocalDate weekEnd, LocalDate deadline,
+            LocalDate nextOpens, boolean oneEmergencyPerMonth, boolean emergencyUsedThisMonth) {
+    }
+
+    /** Days off a manager gives (e.g. from the suggestions), approved straight away. */
+    public record AssignDaysOffRequest(@NotNull Long areaId,
+            @NotEmpty @Size(max = 200) List<@NotNull @jakarta.validation.Valid AssignedDay> items) {
+    }
+
+    public record AssignedDay(@NotNull Long employeeId, @NotNull LocalDate date) {
+    }
+
     public record TakenDay(LocalDate date, String takenBy, DayOffStatus status, boolean full) {
         public TakenDay(LocalDate date, String takenBy, DayOffStatus status) {
             this(date, takenBy, status, false);

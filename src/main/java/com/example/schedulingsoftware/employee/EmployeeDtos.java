@@ -35,26 +35,38 @@ public final class EmployeeDtos {
             /** Schedule updates by email. Null keeps the current setting. */
             Boolean emailOptIn,
             /** Date of birth (optional), for birthday reminders. Null means not on file. */
-            @Past(message = "must be in the past") java.time.LocalDate birthDate) {
+            @Past(message = "must be in the past") java.time.LocalDate birthDate,
+            /**
+             * Stores auto-fill may send them to when they float or cover (all in their area). Empty = any store in the
+             * area. Null keeps the current list.
+             */
+            @jakarta.validation.constraints.Size(max = 50) java.util.List<@NotNull Long> floatStoreIds) {
+
+        public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
+                Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
+                Boolean whatsappOptIn, Boolean emailOptIn, java.time.LocalDate birthDate) {
+            this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
+                    primaryAtStore, whatsappOptIn, emailOptIn, birthDate, null);
+        }
 
         public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
                 Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
                 Boolean whatsappOptIn, Boolean emailOptIn) {
             this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
-                    primaryAtStore, whatsappOptIn, emailOptIn, null);
+                    primaryAtStore, whatsappOptIn, emailOptIn, null, null);
         }
 
         public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
                 Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore) {
             this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
-                    primaryAtStore, null, null, null);
+                    primaryAtStore, null, null, null, null);
         }
 
         public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
                 Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
                 Boolean whatsappOptIn) {
             this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
-                    primaryAtStore, whatsappOptIn, null, null);
+                    primaryAtStore, whatsappOptIn, null, null, null);
         }
     }
 
@@ -85,7 +97,10 @@ public final class EmployeeDtos {
             /** Agreed to text messages (only they can turn it on), and when. */
             boolean smsOptIn,
             Instant smsConsentAt,
-            java.time.LocalDate birthDate) {
+            java.time.LocalDate birthDate,
+            /** Stores they may float to (empty = any store in the area), and their names. */
+            java.util.List<Long> floatStoreIds,
+            java.util.List<String> floatStoreNames) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -110,7 +125,12 @@ public final class EmployeeDtos {
                     e.isEmailOptIn(),
                     e.isSmsOptIn(),
                     e.getSmsConsentAt(),
-                    e.getBirthDate());
+                    e.getBirthDate(),
+                    e.getFloatStores().stream().sorted(java.util.Comparator.comparing(
+                            com.example.schedulingsoftware.store.Store::getName)).map(
+                                    com.example.schedulingsoftware.store.Store::getId).toList(),
+                    e.getFloatStores().stream().map(com.example.schedulingsoftware.store.Store::getName).sorted()
+                            .toList());
         }
     }
 

@@ -150,6 +150,37 @@ class StoreAssignerTest {
     }
 
     @Test
+    void floatersOnlyGoToTheStoresTheyAreAllowed() {
+        // Store 1 is short, but floater 1 may only work at store 2 (and 3); floater 2 may go anywhere.
+        var stores = List.of(new StoreSlot(1L, 1), new StoreSlot(2L, 0), new StoreSlot(3L, 0));
+        var result = assigner.assign(stores, List.of(slot(1, MON, null), slot(2, MON, null)),
+                Map.of(1L, Set.of(2L, 3L)));
+        assertTrue(Set.of(2L, 3L).contains(result.get("1-" + MON).storeId()), "floater 1 stays within their stores");
+        assertEquals(1L, result.get("2-" + MON).storeId(), "floater 2 covers the short store");
+
+        // A secondary with a list is only moved to a store on it.
+        var two = List.of(new StoreSlot(1L, 2), new StoreSlot(2L, 0), new StoreSlot(3L, 1));
+        var moved = assigner.assign(two, List.of(slot(1, MON, 2L), slot(2, MON, 2L), slot(3, MON, 1L)),
+                Map.of(1L, Set.of(3L), 2L, Set.of(3L)));
+        assertTrue(!Long.valueOf(1L).equals(moved.get("1-" + MON).storeId()));
+        assertTrue(!Long.valueOf(1L).equals(moved.get("2-" + MON).storeId()));
+    }
+
+    @Test
+    void floatersRespectEachStoresFloaterLimit() {
+        // Store 1 needs one person and takes at most one floater a day; store 2 has no limit.
+        var capped = List.of(new StoreSlot(1L, 1, Set.of(), 1), new StoreSlot(2L, 0, Set.of(), 0));
+        var result = assigner.assign(capped, List.of(slot(1, MON, null), slot(2, MON, null), slot(3, MON, null)));
+        long atOne = result.values().stream().filter(a -> Long.valueOf(1L).equals(a.storeId())).count();
+        assertEquals(1, atOne);
+
+        // Without the limit the same three floaters put two at store 1.
+        var open = List.of(new StoreSlot(1L, 1), new StoreSlot(2L, 0));
+        var free = assigner.assign(open, List.of(slot(1, MON, null), slot(2, MON, null), slot(3, MON, null)));
+        assertEquals(2, free.values().stream().filter(a -> Long.valueOf(1L).equals(a.storeId())).count());
+    }
+
+    @Test
     void noStoresMeansNoAssignment() {
         var result = assigner.assign(List.of(), List.of(slot(1, MON, null)));
         assertNull(result.get("1-" + MON).storeId());

@@ -104,7 +104,9 @@ public final class ScheduleDtos {
             com.example.schedulingsoftware.employee.StoreRole storeRole,
             int expectedWorkDays,
             int scheduledWorkDays,
-            List<DayCell> days) {
+            List<DayCell> days,
+            /** Stores they may float to (empty = any); managers only. */
+            List<Long> floatStoreIds) {
     }
 
     /** How approving a day off would affect staffing. */

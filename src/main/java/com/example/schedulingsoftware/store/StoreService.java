@@ -58,6 +58,9 @@ public class StoreService {
         if (request.minStaffPerDay() != null) {
             store.setMinStaffPerDay(request.minStaffPerDay());
         }
+        if (request.maxFloatersPerDay() != null) {
+            store.setMaxFloatersPerDay(request.maxFloatersPerDay());
+        }
         if (request.active() != null) {
             store.setActive(request.active());
         }
@@ -90,6 +93,9 @@ public class StoreService {
         store.setAddress(blankToNull(request.address()));
         if (request.minStaffPerDay() != null) {
             store.setMinStaffPerDay(request.minStaffPerDay());
+        }
+        if (request.maxFloatersPerDay() != null) {
+            store.setMaxFloatersPerDay(request.maxFloatersPerDay());
         }
         if (request.active() != null) {
             store.setActive(request.active());
