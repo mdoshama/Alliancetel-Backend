@@ -1,6 +1,5 @@
 package com.example.schedulingsoftware.dayoff;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -21,9 +20,10 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Reserved days off. As soon as a week opens for requests, everyone gets their usual days off reserved (1 for
- * people working 6 days, 2 for 5 days), on the days the stores can best spare them. When someone then asks for a
- * different day, the request is approved straight away if the stores can cover it, and a reserved day is given
- * back (it becomes a work day again). If a request is turned down or cancelled, the missing day is reserved again.
+ * people working 6 days, 2 for 5 days), on the days the stores can best spare them. A reserved day is only held:
+ * like any request it waits for a manager or admin to approve it (managers can approve them all at once). When
+ * someone asks for a different day, that request also waits; once it's approved, their reserved day is given back
+ * (it becomes a work day again). If a reserved day is turned down, another day is reserved instead.
  * Published weeks are never touched.
  */
 @Slf4j
@@ -117,10 +117,9 @@ public class DayOffReservations {
             r.setOffDate(date);
             r.setReason(RESERVED_REASON);
             r.setReserved(true);
-            r.setStatus(DayOffStatus.APPROVED);
-            r.setReviewedAt(Instant.now());
+            // Only reserved: it waits for a manager or admin like any request (nothing is approved automatically).
+            r.setStatus(DayOffStatus.PENDING);
             repository.save(r);
-            scheduleService.applyApprovedDayOff(r.getEmployee(), date);
             n++;
         }
         return n;
@@ -144,8 +143,12 @@ public class DayOffReservations {
     @Transactional
     public List<LocalDate> trim(Employee e, LocalDate anyDayInWeek) {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
+        // Reserved days still in play (not turned down), the ones not yet approved given back first.
         List<DayOffRequest> reserved = repository
-                .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6));
+                .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
+                .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
+                .sorted(java.util.Comparator.comparing((DayOffRequest r) -> r.getStatus() == DayOffStatus.APPROVED))
+                .toList();
         if (reserved.isEmpty() || published(e.getArea() == null ? null : e.getArea().getId(), week)) {
             return List.of();
         }
@@ -180,8 +183,9 @@ public class DayOffReservations {
     }
 
     private long ownDaysOff(Employee e, LocalDate week) {
+        // Only approved days count: a request waiting for a manager keeps the reserved day until it's approved.
         return repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(e.getId(), week,
-                week.plusDays(6), List.of(DayOffStatus.PENDING, DayOffStatus.APPROVED));
+                week.plusDays(6), List.of(DayOffStatus.APPROVED));
     }
 
     private boolean published(Long areaId, LocalDate weekStart) {

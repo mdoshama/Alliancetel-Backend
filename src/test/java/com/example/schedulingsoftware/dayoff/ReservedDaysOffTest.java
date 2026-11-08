@@ -104,7 +104,7 @@ class ReservedDaysOffTest {
         assertEquals(1, daysOff(anna).size());
         assertEquals(2, daysOff(dee).size(), "5-day workers get two days");
         assertTrue(daysOff(dee).stream().allMatch(DayOffRequest::isReserved));
-        assertEquals(DayOffStatus.APPROVED, daysOff(anna).getFirst().getStatus());
+        assertEquals(DayOffStatus.PENDING, daysOff(anna).getFirst().getStatus(), "only reserved, not approved");
         // Anna and Ben share a store: their reserved days differ.
         assertFalse(daysOff(anna).getFirst().getOffDate().equals(daysOff(ben).getFirst().getOffDate()));
         // Running again changes nothing.
@@ -149,12 +149,51 @@ class ReservedDaysOffTest {
     }
 
     @Test
-    void askingForTheReservedDayKeepsIt() {
+    void askingForTheReservedDayKeepsItWaitingForApproval() {
         LocalDate reserved = daysOff(cara).getFirst().getOffDate();
         TestUsers.signInAs(cara, Role.EMPLOYEE, area);
         dayOffService.create(new CreateDayOffRequest(cara, List.of(reserved), null, null));
         assertEquals(1, daysOff(cara).size());
         assertFalse(daysOff(cara).getFirst().isReserved());
+        assertEquals(DayOffStatus.PENDING, daysOff(cara).getFirst().getStatus());
+    }
+
+    @Test
+    void nothingIsApprovedWithoutAManagerOrAdmin() {
+        LocalDate reserved = daysOff(anna).getFirst().getOffDate();
+        LocalDate wanted = week.datesUntil(week.plusDays(7))
+                .filter(d -> !d.equals(reserved)).filter(d -> d.isAfter(portal.today())).findFirst().orElseThrow();
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        dayOffService.create(new CreateDayOffRequest(anna, List.of(wanted), null, null));
+        TestUsers.signInAs(cara, Role.EMPLOYEE, area);
+        dayOffService.create(new CreateDayOffRequest(cara, List.of(daysOff(cara).getFirst().getOffDate()), null, null));
+        reservations.reserveUpcoming();
+        boolean anyApproved = requests.findAll().stream()
+                .filter(r -> r.getEmployee().getArea() != null && r.getEmployee().getArea().getId().equals(area))
+                .anyMatch(r -> r.getStatus() == DayOffStatus.APPROVED);
+        assertFalse(anyApproved, "reserving, swapping and confirming never approve anything");
+        // Employees can't drop their reserved day: they ask for another one instead.
+        TestUsers.signInAs(ben, Role.EMPLOYEE, area);
+        Long bensReserved = daysOff(ben).getFirst().getId();
+        assertThrows(BusinessRuleException.class, () -> dayOffService.cancel(bensReserved));
+    }
+
+    @Test
+    void anApprovedReservedDayStillGivesWayToALaterApprovedRequest() {
+        TestUsers.signInAsAdmin();
+        DayOffRequest reserved = daysOff(dee).getFirst();
+        dayOffService.approve(reserved.getId(), null);
+        assertEquals(DayOffStatus.APPROVED, requests.findById(reserved.getId()).orElseThrow().getStatus());
+        List<LocalDate> deeDays = daysOff(dee).stream().map(DayOffRequest::getOffDate).toList();
+        LocalDate wanted = week.datesUntil(week.plusDays(7)).filter(d -> !deeDays.contains(d))
+                .filter(d -> d.isAfter(portal.today())).findFirst().orElseThrow();
+        TestUsers.signInAs(dee, Role.EMPLOYEE, area);
+        Long id = dayOffService.create(new CreateDayOffRequest(dee, List.of(wanted), null, null)).getFirst().id();
+        TestUsers.signInAsAdmin();
+        dayOffService.approve(id, null);
+        // Dee takes 2 days a week: her own approved day plus one reserved day remain.
+        assertEquals(2, daysOff(dee).size());
+        assertTrue(daysOff(dee).stream().anyMatch(r -> r.getOffDate().equals(wanted)));
     }
 
     @Test
@@ -181,9 +220,17 @@ class ReservedDaysOffTest {
                 () -> scheduleService.generate(area, week));
         assertTrue(open.getMessage().contains("still open"), open.getMessage());
         dayOffService.setPortal(PortalMode.CLOSED);
+        scheduleService.generate(area, week);
+        // A manager approves the reserved days in one go; then they're off on the schedule.
+        List<Long> reservedIds = requests.findAll().stream()
+                .filter(r -> r.isReserved() && r.getStatus() == DayOffStatus.PENDING)
+                .filter(r -> r.getEmployee().getArea().getId().equals(area))
+                .map(DayOffRequest::getId).toList();
+        var result = dayOffService.approveMany(reservedIds, false);
+        assertEquals(reservedIds.size(), result.approved().size());
         var schedule = scheduleService.generate(area, week);
         long annaOff = schedule.rows().stream().filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow()
                 .days().stream().filter(c -> c.type() != com.example.schedulingsoftware.schedule.DayType.WORK).count();
-        assertTrue(annaOff >= 1, "her reserved day is off on the schedule");
+        assertTrue(annaOff >= 1, "her approved reserved day is off on the schedule");
     }
 }

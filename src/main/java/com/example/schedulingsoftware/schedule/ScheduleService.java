@@ -1110,7 +1110,7 @@ public class ScheduleService {
                                 .thenComparing(DayOffRequest::getId))
                         .map(r -> new WeekRequest(r.getId(), r.getEmployee().getId(), r.getEmployee().getFullName(),
                                 r.getOffDate(), r.isEmergency(), r.getReason(),
-                                !me.isEmployee() && !r.getEmployee().getId().equals(me.id())))
+                                !me.isEmployee() && !r.getEmployee().getId().equals(me.id()), r.isReserved()))
                         .toList();
         Map<String, WeekRequest> requestByDay = new HashMap<>();
         requests.forEach(r -> requestByDay.putIfAbsent(r.employeeId() + "|" + r.date(), r));

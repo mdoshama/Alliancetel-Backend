@@ -90,7 +90,9 @@ public final class ScheduleDtos {
      * @param canReview the signed-in user may approve it (managers can't decide their own)
      */
     public record WeekRequest(Long id, Long employeeId, String employeeName, LocalDate date, boolean emergency,
-            String reason, boolean canReview) {
+            String reason, boolean canReview,
+            /** Reserved by the system (not asked for by the person); approved like any request. */
+            boolean reserved) {
     }
 
     public record EmployeeRow(

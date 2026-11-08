@@ -169,10 +169,10 @@ public class DayOffService {
         for (java.util.Iterator<LocalDate> it = dates.iterator(); it.hasNext();) {
             LocalDate date = it.next();
             DayOffRequest existing = repository.findByEmployeeIdAndOffDate(employee.getId(), date).orElse(null);
-            if (existing != null && existing.isReserved()) {
+            if (existing != null && existing.isReserved() && existing.getStatus() != DayOffStatus.REJECTED) {
+                // Now their own request; still waiting for a manager unless one already approved it.
                 existing.setReserved(false);
                 existing.setReason(InputRules.clean(request.reason()));
-                existing.setReviewNote("You picked the day that was reserved for you.");
                 confirmed.add(DayOffResponse.from(existing));
                 it.remove();
             }
@@ -204,12 +204,13 @@ public class DayOffService {
                 }
             });
             // One person off per store per day, so the store's primary and secondary are never both away. A day the
-            // system only reserved for a colleague doesn't block the request: if a manager approves it, the colleague's
-            // reservation moves to another day.
+            // system only reserved for a colleague (not approved yet) doesn't block the request: if a manager approves
+            // it, the colleague's reservation moves to another day.
             if (employee.getHomeStore() != null) {
                 DayOffRequest real = repository.findSameStore(employee.getHomeStore().getId(), employee.getId(),
                         dates.first(), dates.last(), OPEN_STATUSES).stream()
-                        .filter(r -> dates.contains(r.getOffDate()) && !r.isReserved())
+                        .filter(r -> dates.contains(r.getOffDate())
+                                && !(r.isReserved() && r.getStatus() == DayOffStatus.PENDING))
                         .findFirst().orElse(null);
                 if (real != null) {
                     throw new BusinessRuleException(real.getEmployee().getFirstName() + " already has "
@@ -249,7 +250,8 @@ public class DayOffService {
         if (area == null) {
             return List.of();
         }
-        return repository.findForAreaOnDate(area, date, List.of(DayOffStatus.APPROVED)).stream()
+        // Only ones nobody approved yet can move; a reserved day a manager approved stays.
+        return repository.findForAreaOnDate(area, date, List.of(DayOffStatus.PENDING)).stream()
                 .filter(r -> r.isReserved() && !r.getEmployee().getId().equals(employee.getId()))
                 .toList();
     }
@@ -410,7 +412,7 @@ public class DayOffService {
         // A colleague's reserved day isn't shown as taken: asking for it moves their reservation to another day.
         return repository.findSameStore(employee.getHomeStore().getId(), employee.getId(), from, to, OPEN_STATUSES)
                 .stream()
-                .filter(r -> !r.isReserved())
+                .filter(r -> !(r.isReserved() && r.getStatus() == DayOffStatus.PENDING))
                 .map(r -> new TakenDay(r.getOffDate(), r.getEmployee().getFirstName(), r.getStatus()))
                 .toList();
     }
@@ -440,7 +442,7 @@ public class DayOffService {
         List<DayOffRequest> aside = new ArrayList<>();
         if (e.getHomeStore() != null) {
             repository.findSameStore(e.getHomeStore().getId(), e.getId(), date, date, OPEN_STATUSES).stream()
-                    .filter(DayOffRequest::isReserved).forEach(aside::add);
+                    .filter(o -> o.isReserved() && o.getStatus() == DayOffStatus.PENDING).forEach(aside::add);
         }
         aside.forEach(reservations::moveAside);
         for (DayOffRequest other : reservedOthersOn(e, date)) {
@@ -577,6 +579,10 @@ public class DayOffService {
         }
         if (r.getStatus() != DayOffStatus.PENDING) {
             throw new BusinessRuleException("Only pending requests can be cancelled.");
+        }
+        if (own && r.isReserved()) {
+            throw new BusinessRuleException("This day was reserved for you. To change it, ask for a different day; "
+                    + "once your manager approves it, this one goes back to being a work day.");
         }
         Employee e = r.getEmployee();
         LocalDate date = r.getOffDate();
