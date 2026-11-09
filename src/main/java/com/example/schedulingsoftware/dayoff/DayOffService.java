@@ -504,15 +504,23 @@ public class DayOffService {
      */
     @Transactional
     public ApproveManyResult approveMany(List<Long> ids, boolean onlyIfCovered) {
-        List<DayOffRequest> requests = repository.findAllById(new java.util.LinkedHashSet<>(ids)).stream()
+        // Work from the ids, not the loaded rows: approving one request can give back (delete and re-reserve) a
+        // reserved day that is also in this batch, so each one is looked up again just before it's decided.
+        List<Long> order = repository.findAllById(new java.util.LinkedHashSet<>(ids)).stream()
                 .sorted(java.util.Comparator.comparing(DayOffRequest::getOffDate)
                         .thenComparing(r -> !r.isEmergency())
                         .thenComparing(DayOffRequest::getId))
+                .map(DayOffRequest::getId)
                 .toList();
         CurrentUser user = accessPolicy.current();
         List<DayOffResponse> approved = new ArrayList<>();
         List<SkippedRequest> skipped = new ArrayList<>();
-        for (DayOffRequest r : requests) {
+        for (Long id : order) {
+            DayOffRequest r = repository.findById(id).orElse(null);
+            if (r == null) {
+                // A reserved day given back because an earlier request in this batch was approved. Nothing to decide.
+                continue;
+            }
             Employee e = r.getEmployee();
             String why = null;
             if (r.getStatus() != DayOffStatus.PENDING) {

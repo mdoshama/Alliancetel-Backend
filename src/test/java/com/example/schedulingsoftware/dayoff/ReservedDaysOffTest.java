@@ -1,5 +1,6 @@
 package com.example.schedulingsoftware.dayoff;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -132,6 +133,31 @@ class ReservedDaysOffTest {
         assertEquals(0, status.missing().size());
         assertEquals(1, daysOff(ben).size());
         assertFalse(daysOff(ben).getFirst().getOffDate().equals(wanted));
+    }
+
+    /** "Approve all that fit" with a reserved day in the batch that an earlier approval gives back. */
+    @Test
+    void approveManySkipsAReservedDayThatAnEarlierApprovalGaveBack() {
+        DayOffRequest reservedRow = daysOff(anna).getFirst();
+        Long reservedId = reservedRow.getId();
+        LocalDate reserved = reservedRow.getOffDate();
+        // Prefer a day before the reserved one: the batch runs earliest day first, so her request is approved first
+        // and gives the reserved day back while it is still waiting in the batch (the case that used to fail).
+        List<LocalDate> open = week.datesUntil(week.plusDays(7))
+                .filter(d -> !d.equals(reserved)).filter(d -> d.isAfter(portal.today())).toList();
+        LocalDate wanted = open.stream().filter(d -> d.isBefore(reserved)).findFirst().orElse(open.getFirst());
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        Long asked = dayOffService.create(new CreateDayOffRequest(anna, List.of(wanted), "Family", null)).getFirst().id();
+
+        TestUsers.signInAsAdmin();
+        var result = assertDoesNotThrow(() -> dayOffService.approveMany(List.of(reservedId, asked), false));
+        assertTrue(result.approved().stream().anyMatch(r -> r.id().equals(asked)));
+        if (wanted.isBefore(reserved)) {
+            assertFalse(requests.findById(reservedId).isPresent(), "given back while approving");
+            assertTrue(result.approved().stream().noneMatch(r -> r.id().equals(reservedId)));
+        }
+        assertTrue(daysOff(anna).stream().anyMatch(r -> r.getStatus() == DayOffStatus.APPROVED
+                && r.getOffDate().equals(wanted)));
     }
 
     @Test
