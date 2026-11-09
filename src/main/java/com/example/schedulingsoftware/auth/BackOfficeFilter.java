@@ -11,8 +11,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Back office staff only use the Time Clock: their own account (/api/auth), the time clock, and reading areas and
- * stores. Everything else is refused, whatever other rules say.
+ * Back office staff only use the Time Clock: their own account (/api/auth), the time clock, the live-updates stream,
+ * and reading areas and stores. Everything else is refused, whatever other rules say.
  */
 public class BackOfficeFilter extends OncePerRequestFilter {
 
@@ -32,7 +32,7 @@ public class BackOfficeFilter extends OncePerRequestFilter {
         if (!path.startsWith("/api/")) {
             return true;
         }
-        if (path.startsWith("/api/auth/") || path.startsWith("/api/time-clock")) {
+        if (path.startsWith("/api/auth/") || path.startsWith("/api/time-clock") || path.equals("/api/live")) {
             return true;
         }
         boolean read = "GET".equalsIgnoreCase(request.getMethod());

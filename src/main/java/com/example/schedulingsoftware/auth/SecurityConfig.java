@@ -26,6 +26,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.example.schedulingsoftware.employee.EmployeeRepository;
 
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 
@@ -56,6 +57,9 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // The live stream (and any other async response) finishes on a second dispatch with no
+                        // token on it; the first dispatch was already checked.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         // Set-password links from the welcome / reset email: the link's secret is the proof.
                         .requestMatchers(HttpMethod.POST, "/api/auth/setup-password", "/api/auth/setup-password/check")
@@ -131,7 +135,7 @@ public class SecurityConfig {
             CorsConfiguration config = new CorsConfiguration();
             config.setAllowedOrigins(origins);
             config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-            config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+            config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Client-Id"));
             config.setMaxAge(3600L);
             source.registerCorsConfiguration("/api/**", config);
         }

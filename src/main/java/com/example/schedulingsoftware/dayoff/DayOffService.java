@@ -95,13 +95,25 @@ public class DayOffService {
     @Transactional(readOnly = true)
     public PageResponse<DayOffResponse> page(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to, String query, Integer page, Integer size) {
-        var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query);
+        return page(requestedAreaId, requestedEmployeeId, status, from, to, query, null, page, size);
+    }
+
+    /** Same, optionally only reserved days ({@code reserved = true}) or only ones people asked for ({@code false}). */
+    @Transactional(readOnly = true)
+    public PageResponse<DayOffResponse> page(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
+            LocalDate from, LocalDate to, String query, Boolean reserved, Integer page, Integer size) {
+        var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query, reserved);
         return PageResponse.from(repository.findAll(spec, PageResponse.request(page, size, Sort.by("offDate", "id"))),
                 DayOffResponse::from);
     }
 
     private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to, String query) {
+        return filter(requestedAreaId, requestedEmployeeId, status, from, to, query, null);
+    }
+
+    private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
+            LocalDate from, LocalDate to, String query, Boolean reserved) {
         CurrentUser user = accessPolicy.current();
         Long areaId = accessPolicy.restrictToArea(requestedAreaId);
         // Employees only ever see their own requests.
@@ -116,6 +128,9 @@ public class DayOffService {
             }
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (reserved != null) {
+                predicates.add(cb.equal(root.get("reserved"), reserved));
             }
             if (from != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("offDate"), from));
