@@ -43,6 +43,7 @@ public class WeekRequests {
     private final StoreRepository storeRepository;
     private final AccessPolicy accessPolicy;
     private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
+    private final FullWeekRepository fullWeeks;
 
     /** Where someone stands for the week. */
     public enum State {
@@ -55,7 +56,9 @@ public class WeekRequests {
         /** Every request this week was turned down. */
         DENIED,
         /** Hasn't asked for anything; has the days the system reserved. */
-        RESERVED
+        RESERVED,
+        /** Works all 7 days this week (a manager or admin decided): no day off needed. */
+        FULL_WEEK
     }
 
     /**
@@ -76,7 +79,7 @@ public class WeekRequests {
      */
     public record Status(LocalDate weekStart, int total, int sent, List<PersonStatus> missing,
             List<PersonStatus> denied, List<PersonStatus> fewer, List<PersonStatus> reserved,
-            List<PersonStatus> others, boolean requestsOpen, Capacity capacity) {
+            List<PersonStatus> others, boolean requestsOpen, Capacity capacity, List<PersonStatus> fullWeek) {
     }
 
     /**
@@ -118,8 +121,9 @@ public class WeekRequests {
         List<PersonStatus> others = people.stream()
                 .filter(p -> p.state() == State.PENDING || p.state() == State.APPROVED)
                 .filter(p -> p.stillNeeded() == 0).toList();
+        List<PersonStatus> full = people.stream().filter(p -> p.state() == State.FULL_WEEK).toList();
         return new Status(week, people.size(), people.size() - missing.size() - reserved.size(), missing, denied,
-                fewer, reserved, others, portal.isOpenFor(week), capacity(areaId, week));
+                fewer, reserved, others, portal.isOpenFor(week), capacity(areaId, week), full);
     }
 
     /** See {@link Capacity}. */
@@ -128,12 +132,14 @@ public class WeekRequests {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
         Coverage coverage = coverage(areaId);
         Map<LocalDate, Set<Long>> off = offByDate(requests(areaId, week));
+        Set<Long> full = fullWeekIds(areaId, week);
         int needed = 0;
         int available = 0;
         int toGive = 0;
         for (Employee e : coverage.staff()) {
-            available += Math.min(7, Math.max(0, e.getWorkDaysPerWeek()));
-            toGive += Math.max(0, 7 - e.getWorkDaysPerWeek());
+            int days = full.contains(e.getId()) ? 7 : e.getWorkDaysPerWeek();
+            available += Math.min(7, Math.max(0, days));
+            toGive += Math.max(0, 7 - days);
         }
         List<DayCapacity> days = new ArrayList<>();
         for (LocalDate d : week.datesUntil(week.plusDays(7)).toList()) {
@@ -149,6 +155,13 @@ public class WeekRequests {
     @Transactional(readOnly = true)
     public Coverage coverage(Long areaId) {
         return Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff(areaId));
+    }
+
+    /** People working all 7 days in that week (see {@link FullWeek}). */
+    @Transactional(readOnly = true)
+    public Set<Long> fullWeekIds(Long areaId, LocalDate weekStart) {
+        return fullWeeks.findForArea(areaId, DayOffService.weekStart(weekStart)).stream()
+                .map(f -> f.getEmployee().getId()).collect(Collectors.toSet());
     }
 
     private static Map<LocalDate, Set<Long>> offByDate(List<DayOffRequest> requests) {
@@ -213,7 +226,7 @@ public class WeekRequests {
             }
         }
 
-        Map<Long, PersonStatus> statuses = people(staff, requests).stream()
+        Map<Long, PersonStatus> statuses = people(staff, requests, fullWeekIds(areaId, week)).stream()
                 .collect(Collectors.toMap(PersonStatus::employeeId, p -> p));
         // Most constrained first: the people with the fewest days the stores can spare them (a primary tied to one
         // store, a floater with only a couple of stores), so everyone still gets a day that works.
@@ -296,10 +309,10 @@ public class WeekRequests {
     }
 
     private List<PersonStatus> people(Long areaId, LocalDate week) {
-        return people(staff(areaId), requests(areaId, week));
+        return people(staff(areaId), requests(areaId, week), fullWeekIds(areaId, week));
     }
 
-    private static List<PersonStatus> people(List<Employee> staff, List<DayOffRequest> requests) {
+    private static List<PersonStatus> people(List<Employee> staff, List<DayOffRequest> requests, Set<Long> fullWeek) {
         Map<Long, List<DayOffRequest>> byPerson = requests.stream()
                 .collect(Collectors.groupingBy(r -> r.getEmployee().getId()));
         return staff.stream().filter(WeekRequests::needsDayOff).map(e -> {
@@ -307,6 +320,13 @@ public class WeekRequests {
             List<DayOffRequest> mine = all.stream().filter(r -> !r.isReserved()).toList();
             boolean hasReserved = all.stream().anyMatch(DayOffRequest::isReserved);
             State state;
+            if (fullWeek.contains(e.getId())) {
+                int asked = (int) all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).count();
+                return new PersonStatus(e.getId(), e.getFullName(),
+                        e.getHomeStore() == null ? null : e.getHomeStore().getName(), State.FULL_WEEK,
+                        all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
+                                .map(DayOffRequest::getOffDate).sorted().toList(), 0, asked);
+            }
             if (mine.isEmpty()) {
                 state = hasReserved ? State.RESERVED : State.MISSING;
             } else if (mine.stream().anyMatch(r -> r.getStatus() == DayOffStatus.APPROVED)) {
@@ -332,7 +352,7 @@ public class WeekRequests {
 
     private List<Employee> staff(Long areaId) {
         return employeeRepository.findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId,
-                SCHEDULED_ROLES);
+                SCHEDULED_ROLES).stream().filter(Employee::worksShifts).toList();
     }
 
     private List<DayOffRequest> requests(Long areaId, LocalDate week) {

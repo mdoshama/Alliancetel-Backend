@@ -33,6 +33,13 @@ public class ScheduleController {
     private final ScheduleService scheduleService;
     private final WeekRequests weekRequests;
     private final com.example.schedulingsoftware.dayoff.DayOffService dayOffService;
+    private final FullWeekService fullWeekService;
+    private final com.example.schedulingsoftware.employee.EmployeeService employeeService;
+
+    private Long employeeArea(Long employeeId) {
+        var area = employeeService.getEmployee(employeeId).getArea();
+        return area == null ? null : area.getId();
+    }
 
     /** Managers: who has sent their day-off request for the week, who hasn't, and who was turned down. */
     @GetMapping("/requests")
@@ -46,6 +53,18 @@ public class ScheduleController {
     public List<WeekRequests.Suggestion> suggest(@RequestParam Long areaId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
         return weekRequests.suggest(areaId, weekStart);
+    }
+
+    /** Managers and admins: someone works all 7 days of that week (on), or back to their usual days (off). */
+    @PostMapping("/requests/full-week")
+    public WeekRequests.Status fullWeek(@Valid @RequestBody FullWeekRequest request) {
+        fullWeekService.set(request.employeeId(), request.weekStart(), Boolean.TRUE.equals(request.on()));
+        Long areaId = employeeArea(request.employeeId());
+        return weekRequests.status(areaId, request.weekStart());
+    }
+
+    public record FullWeekRequest(@jakarta.validation.constraints.NotNull Long employeeId,
+            @jakarta.validation.constraints.NotNull LocalDate weekStart, Boolean on) {
     }
 
     /** Managers: gives the chosen suggested days off (approved, and each person is told). */

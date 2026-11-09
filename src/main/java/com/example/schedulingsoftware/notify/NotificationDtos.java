@@ -25,7 +25,7 @@ public final class NotificationDtos {
                     n.getEmail(), n.getSubject(), n.getKind(), n.getStatus(),
                     n.getChannel() == NotificationChannel.EMAIL && n.getBody() != null
                             && n.getKind() != NotificationKind.ACCOUNT_SETUP ? n.getBody() : n.getPreview(),
-                    n.getError(), n.getAttempts(), n.getCreatedAt(), n.getSentAt());
+                    withoutProvider(n.getError()), n.getAttempts(), n.getCreatedAt(), n.getSentAt());
         }
     }
 
@@ -57,5 +57,16 @@ public final class NotificationDtos {
 
     /** @param recipients people the message was queued for; reachable = with a phone and agreement */
     public record AnnounceResult(int recipients, int reachable) {
+    }
+
+    /** Errors are shown on the Messages page without the provider's name (older ones were saved with it). */
+    static String withoutProvider(String error) {
+        if (error == null) {
+            return null;
+        }
+        return error.replace("WhatsApp (Twilio)", "WhatsApp")
+                .replace("in the Twilio Console", "on the account")
+                .replace("Twilio trial accounts", "Trial texting accounts")
+                .replaceAll("(?i)twilio", "messaging service");
     }
 }

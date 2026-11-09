@@ -68,7 +68,7 @@ public class TwilioApi {
             boolean retry = response.statusCode() == 429 || response.statusCode() >= 500;
             return SendResult.failed(what + " said: " + errorText(reply, response.statusCode()), retry);
         } catch (java.io.IOException e) {
-            return SendResult.failed("Couldn't reach Twilio: " + e.getMessage(), true);
+            return SendResult.failed("Couldn't reach the messaging service: " + e.getMessage(), true);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return SendResult.failed("Interrupted while sending.", true);
@@ -87,6 +87,8 @@ public class TwilioApi {
                 message += ". " + hint;
             }
         }
+        // People see this on the Messages page: no provider names.
+        message = message.replaceAll("(?i)twilio", "messaging service");
         return message.length() > 400 ? message.substring(0, 400) : message;
     }
 

@@ -51,7 +51,7 @@ public final class ScheduleDtos {
 
     /** {@code hours} has seven entries, Monday first. */
     public record StoreRef(Long id, String name, String code, String label, int minStaffPerDay, List<DayHours> hours,
-            String color) {
+            String color, String address) {
     }
 
     /** minStaffPerDay is 0 for the "no store assigned" row. */

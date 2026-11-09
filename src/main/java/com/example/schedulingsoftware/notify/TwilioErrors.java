@@ -6,17 +6,17 @@ import java.util.Map;
 final class TwilioErrors {
 
     private static final Map<String, String> HINTS = Map.ofEntries(
-            Map.entry("21608", "Twilio trial accounts can only text numbers verified in the Twilio Console."),
+            Map.entry("21608", "The texting account is still a trial: it can only text numbers verified on the account."),
             Map.entry("21610", "They replied STOP; they can text START to get messages again."),
             Map.entry("21211", "The phone number isn't valid; check it on the employee's details."),
             Map.entry("30003", "The phone is off or out of service."),
             Map.entry("30005", "The number doesn't exist or isn't a mobile."),
             Map.entry("30006", "That number is a landline or can't receive texts."),
-            Map.entry("30007", "The carrier filtered it; finish A2P 10DLC registration in Twilio."),
+            Map.entry("30007", "The carrier filtered it; the texting number's carrier (A2P 10DLC) registration needs to be finished."),
             Map.entry("30034", "The sending number isn't registered for A2P 10DLC yet."),
-            Map.entry("63015", "They haven't joined the WhatsApp Sandbox yet: they need to send the join phrase first."),
-            Map.entry("63016", "Outside WhatsApp's 24-hour window, so it needs an approved template: set the four "
-                    + "TWILIO_WA_CONTENT_ template IDs in Railway (on the Sandbox, the person can message it again to "
+            Map.entry("63015", "They haven't joined the WhatsApp test sandbox yet: they need to send the join phrase first."),
+            Map.entry("63016", "Outside WhatsApp's 24-hour window, so it needs an approved message template: set up the four "
+                    + "WhatsApp templates in the app's settings (on the test sandbox, the person can message it again to "
                     + "reopen 24 hours), then Try again."),
             Map.entry("63003", "That number isn't on WhatsApp."),
             Map.entry("63024", "That number isn't on WhatsApp."),

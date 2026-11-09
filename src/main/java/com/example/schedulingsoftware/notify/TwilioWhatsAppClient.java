@@ -36,7 +36,7 @@ public class TwilioWhatsAppClient implements WhatsAppClient {
                     : ScheduleNotifier.fill(ScheduleNotifier.TEMPLATE_TEXT.get(kind), params);
             form.put("Body", text);
         }
-        return api.send(form, "WhatsApp (Twilio)");
+        return api.send(form, "WhatsApp");
     }
 
     /** {"1":"Ana","2":"Nov 9–15",…} */

@@ -77,6 +77,7 @@ public class ScheduleService {
     private final ScheduleNotifier notifier;
     private final WeekRequests weekRequests;
     private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
+    private final FullWeekRepository fullWeeks;
 
     /** Generating waits until everyone has sent their day-off request for the week (or been given a day off). */
     @org.springframework.beans.factory.annotation.Value("${alliancetel.scheduling.require-requests-before-generate:true}")
@@ -183,7 +184,8 @@ public class ScheduleService {
         scheduleRepository.flush();
 
         List<Employee> staff = employeeRepository
-                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES);
+                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES).stream()
+                .filter(Employee::worksShifts).toList();
         if (staff.isEmpty()) {
             throw new BusinessRuleException("Area '" + area.getName() + "' has no active staff to schedule.");
         }
@@ -659,7 +661,8 @@ public class ScheduleService {
             return new DayRoom(date, 0, 0, List.of(), false, List.of());
         }
         List<Employee> staff = employeeRepository
-                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES);
+                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES).stream()
+                .filter(Employee::worksShifts).toList();
         Coverage coverage = Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff);
         Map<Long, String> asked = new LinkedHashMap<>();
         for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, date, openStatuses)) {
@@ -667,7 +670,7 @@ public class ScheduleService {
             if (reservedCanMove && r.isReserved() && r.getStatus() == DayOffStatus.PENDING) {
                 continue;
             }
-            if (e.isActive() && !e.getId().equals(employee.getId()) && SCHEDULED_ROLES.contains(e.getRole())) {
+            if (e.worksShifts() && !e.getId().equals(employee.getId())) {
                 asked.put(e.getId(), e.getFirstName());
             }
         }
@@ -930,7 +933,8 @@ public class ScheduleService {
     private Map<Long, Sim> planFromGenerator(Long areaId, LocalDate weekStart, List<DayOffRequest> approved,
             DayOffRequest extra) {
         List<Employee> staff = employeeRepository
-                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES);
+                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES).stream()
+                .filter(Employee::worksShifts).toList();
         Map<Long, Set<LocalDate>> off = new HashMap<>();
         approved.forEach(r -> off.computeIfAbsent(r.getEmployee().getId(), k -> new java.util.HashSet<>()).add(r.getOffDate()));
         if (extra != null) {
@@ -1126,6 +1130,9 @@ public class ScheduleService {
 
         // Primary / secondary / floater is for managers; employees don't see it.
         boolean hideStoreRoles = accessPolicy.current().isEmployee();
+        // People working all 7 days this week (a manager's decision) are expected to work every day.
+        Set<Long> fullWeek = fullWeeks.findForArea(schedule.getArea().getId(), schedule.getWeekStart()).stream()
+                .map(f -> f.getEmployee().getId()).collect(Collectors.toSet());
 
         Map<Long, List<ScheduleEntry>> byEmployee = new LinkedHashMap<>();
         Map<LocalDate, Integer> headCount = new HashMap<>();
@@ -1173,7 +1180,8 @@ public class ScheduleService {
                     Store home = e.getHomeStore();
                     return new EmployeeRow(e.getId(), e.getEmployeeCode(), e.getFullName(), e.getRole(),
                             home == null ? null : home.getId(), home == null ? null : home.getName(),
-                            hideStoreRoles ? null : e.getStoreRole(), e.getWorkDaysPerWeek(), working, cells,
+                            hideStoreRoles ? null : e.getStoreRole(),
+                            fullWeek.contains(e.getId()) ? 7 : e.getWorkDaysPerWeek(), working, cells,
                             hideStoreRoles ? List.of() : List.copyOf(e.floatStoreIds()));
                 })
                 .sorted(Comparator.comparing((EmployeeRow r) -> r.role() == Role.MANAGER ? 0 : 1)
@@ -1187,7 +1195,7 @@ public class ScheduleService {
         List<StoreRef> storeRefs = areaStores.stream()
                 .filter(Store::isActive)
                 .map(s -> new StoreRef(s.getId(), s.getName(), s.getCode(), s.getLabel(), s.getMinStaffPerDay(),
-                        DayHours.weekOf(s), s.getDisplayColor()))
+                        DayHours.weekOf(s), s.getDisplayColor(), s.getAddress()))
                 .toList();
         List<StoreCoverage> coverage = storeCoverage(schedule, dates, areaStores);
         List<CoverageGap> gaps = new ArrayList<>();

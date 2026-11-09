@@ -129,6 +129,7 @@ public class AuthService {
         e.setSmsOptIn(optIn);
         if (optIn) {
             e.setSmsConsentAt(java.time.Instant.now());
+            e.setSmsConsentBy(null);
             log.info("Text-message consent recorded for employee {}", e.getId());
         }
         return Me.from(e);

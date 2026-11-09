@@ -67,7 +67,7 @@ class TwilioWhatsAppTest {
         assertTrue(TwilioStatusController.validSignature("token", url, form, good));
         assertFalse(TwilioStatusController.validSignature("other", url, form, good));
         assertFalse(TwilioStatusController.validSignature("token", url, form, null));
-        assertEquals("They haven't joined the WhatsApp Sandbox yet: they need to send the join phrase first.",
+        assertEquals("They haven't joined the WhatsApp test sandbox yet: they need to send the join phrase first.",
                 TwilioErrors.hint("63015"));
     }
 }

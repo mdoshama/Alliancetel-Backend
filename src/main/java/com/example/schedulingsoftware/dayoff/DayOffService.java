@@ -150,6 +150,10 @@ public class DayOffService {
         if (!employee.isActive()) {
             throw new BusinessRuleException(employee.getFullName() + " is inactive and cannot request days off.");
         }
+        if (!employee.worksShifts()) {
+            throw new BusinessRuleException(employee.getFullName() + " isn't on the schedule (only manages), so there "
+                    + "are no days off to request.");
+        }
         LocalDate today = LocalDate.now();
         TreeSet<LocalDate> dates = new TreeSet<>(request.dates());
         boolean emergency = Boolean.TRUE.equals(request.emergency());

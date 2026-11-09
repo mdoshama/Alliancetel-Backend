@@ -90,14 +90,23 @@ public class Employee {
     @Column(nullable = false)
     private boolean active = true;
 
+    /**
+     * Works shifts and is on the weekly schedule. Employees always are; a manager who only manages (doesn't work at
+     * a store) is off the schedule: not scheduled, no day-off requests or reserved days, not counted for coverage,
+     * not on the time clock.
+     */
+    @Column(nullable = false)
+    @ColumnDefault("true")
+    private boolean onSchedule = true;
+
     /** Agreed to get schedule updates on WhatsApp (needed before any message is sent). */
     @Column(nullable = false)
     @ColumnDefault("false")
     private boolean whatsappOptIn;
 
     /**
-     * Agreed to get schedule updates by text message (SMS). Only the person can turn it on (consent is required
-     * before texting), and it's turned off when their phone number changes.
+     * Agreed to get schedule updates by text message (SMS). The person turns it on themselves, or an admin does after
+     * they agreed (recorded in {@link #smsConsentBy}); it's turned off when their phone number changes.
      */
     @Column(nullable = false)
     @ColumnDefault("false")
@@ -105,6 +114,10 @@ public class Employee {
 
     /** When they last agreed to text messages (shown the SMS Terms and consent wording), for the carrier records. */
     private java.time.Instant smsConsentAt;
+
+    /** The admin who recorded their agreement to texts; null when they turned it on themselves. */
+    @Column(length = 120)
+    private String smsConsentBy;
 
     /** Gets schedule updates by email (on unless they turn it off). */
     @Column(nullable = false)
@@ -174,6 +187,11 @@ public class Employee {
     }
 
     /** Primaries and managers stay at their home store unless a manager moves them by hand. */
+    /** Active store staff who work shifts (see {@link #onSchedule}). */
+    public boolean worksShifts() {
+        return active && onSchedule && (role == Role.EMPLOYEE || role == Role.MANAGER);
+    }
+
     public boolean isAnchoredToStore() {
         return homeStore != null && (primaryAtStore || role == Role.MANAGER);
     }

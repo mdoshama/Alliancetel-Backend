@@ -92,8 +92,9 @@ public class TimeClockService {
 
         List<Row> others = new ArrayList<>();
         List<Employee> staff = areaId == null
-                ? employees.findAll().stream().filter(e -> e.isActive() && STAFF.contains(e.getRole())).toList()
-                : employees.findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, STAFF);
+                ? employees.findAll().stream().filter(Employee::worksShifts).toList()
+                : employees.findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, STAFF).stream()
+                        .filter(Employee::worksShifts).toList();
         for (Employee e : staff) {
             if (!scheduled.contains(e.getId())) {
                 TimeEntry t = byEmployee.get(e.getId());
@@ -146,8 +147,9 @@ public class TimeClockService {
         CurrentUser user = requireEditor();
         Employee e = employees.findById(request.employeeId())
                 .orElseThrow(() -> new ResourceNotFoundException("Employee", request.employeeId()));
-        if (!e.isActive() || !STAFF.contains(e.getRole())) {
-            throw new BusinessRuleException(e.getFullName() + " isn't store staff who can be clocked in.");
+        if (!e.worksShifts()) {
+            throw new BusinessRuleException(e.getFullName() + " isn't store staff who works shifts, so they aren't "
+                    + "clocked in.");
         }
         LocalDate today = LocalDate.now(zone);
         LocalDate date = request.date();

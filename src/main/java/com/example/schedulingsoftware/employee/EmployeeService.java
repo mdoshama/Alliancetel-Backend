@@ -38,7 +38,9 @@ public class EmployeeService {
     private final AccessPolicy accessPolicy;
     private final PasswordEncoder passwordEncoder;
     private final StoreService storeService;
+    private final com.example.schedulingsoftware.dayoff.DayOffRequestRepository dayOffRepository;
     private final com.example.schedulingsoftware.auth.PasswordSetupService passwordSetup;
+    private final com.example.schedulingsoftware.notify.ScheduleNotifier notifier;
 
     @Transactional(readOnly = true)
     public List<EmployeeResponse> search(Long requestedAreaId, Role role, Boolean active, String query) {
@@ -155,6 +157,9 @@ public class EmployeeService {
         String temporary = PasswordPolicy.generateTemporary();
         employee.setPassword(passwordEncoder.encode(temporary), true);
         Employee saved = employeeRepository.save(employee);
+        if (saved.isSmsOptIn()) {
+            notifier.smsOptInConfirmation(saved.getId());
+        }
         var link = passwordSetup.send(saved, true, textLink);
         return new CredentialsResponse(EmployeeResponse.from(saved), temporary, link.emailed(), link.texted(),
                 link.note());
@@ -171,7 +176,12 @@ public class EmployeeService {
         if (employeeRepository.existsByEmailIgnoreCaseAndIdNot(email, id)) {
             throw new BusinessRuleException("Email '" + email + "' is already in use.");
         }
+        boolean textsBefore = employee.isSmsOptIn();
         apply(employee, request, code, email);
+        if (!textsBefore && employee.isSmsOptIn()) {
+            employeeRepository.flush();
+            notifier.smsOptInConfirmation(employee.getId());
+        }
         return EmployeeResponse.from(employee);
     }
 
@@ -292,6 +302,25 @@ public class EmployeeService {
             employee.setSmsOptIn(false);
         }
         employee.setPhone(phone);
+        if (request.smsOptIn() != null && request.smsOptIn() != employee.isSmsOptIn()) {
+            var by = accessPolicy.current();
+            if (request.smsOptIn()) {
+                // Texting needs the person's agreement: an admin records that they gave it.
+                if (!by.isAdmin()) {
+                    throw new BusinessRuleException("Only an admin can turn on text messages for someone. They can also "
+                            + "turn them on themselves in their account menu.");
+                }
+                if (phone == null) {
+                    throw new BusinessRuleException("Add a mobile number before turning on text messages.");
+                }
+                employee.setSmsOptIn(true);
+                employee.setSmsConsentAt(java.time.Instant.now());
+                employee.setSmsConsentBy(by.fullName());
+                log.info("Text-message consent for {} recorded by {}", email, by.email());
+            } else {
+                employee.setSmsOptIn(false);
+            }
+        }
         employee.setRole(request.role());
         employee.setArea(request.areaId() == null ? null : areaService.getArea(request.areaId()));
         employee.setHomeStore(request.homeStoreId() == null ? null
@@ -303,6 +332,19 @@ public class EmployeeService {
             employee.setPrimaryAtStore(false);
         }
         employee.setWorkDaysPerWeek(request.workDaysPerWeek());
+        // Only managers can be off the schedule (managing without working shifts); everyone else works.
+        boolean wasOnSchedule = employee.isOnSchedule();
+        if (request.role() != Role.MANAGER) {
+            employee.setOnSchedule(true);
+        } else if (request.onSchedule() != null) {
+            employee.setOnSchedule(request.onSchedule());
+        }
+        if (wasOnSchedule && !employee.isOnSchedule() && employee.getId() != null) {
+            // Their days the system reserved from today on are no longer needed.
+            dayOffRepository.deleteAll(dayOffRepository.findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(
+                    employee.getId(), java.time.LocalDate.now(), java.time.LocalDate.now().plusYears(1)).stream()
+                    .filter(r -> r.getStatus() == com.example.schedulingsoftware.dayoff.DayOffStatus.PENDING).toList());
+        }
         if (request.floatStoreIds() != null) {
             java.util.Set<com.example.schedulingsoftware.store.Store> stores = new java.util.HashSet<>();
             for (Long storeId : new java.util.LinkedHashSet<>(request.floatStoreIds())) {

@@ -40,7 +40,30 @@ public final class EmployeeDtos {
              * Stores auto-fill may send them to when they float or cover (all in their area). Empty = any store in the
              * area. Null keeps the current list.
              */
-            @jakarta.validation.constraints.Size(max = 50) java.util.List<@NotNull Long> floatStoreIds) {
+            @jakarta.validation.constraints.Size(max = 50) java.util.List<@NotNull Long> floatStoreIds,
+            /** Managers: works shifts and is on the schedule (false = only manages). Null keeps it (new: true). */
+            Boolean onSchedule,
+            /**
+             * Text-message updates. Only an admin can turn them on for someone, confirming the person agreed (needs a
+             * phone number); admins and managers can turn them off. Null keeps the current setting.
+             */
+            Boolean smsOptIn) {
+
+        public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
+                Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
+                Boolean whatsappOptIn, Boolean emailOptIn, java.time.LocalDate birthDate,
+                java.util.List<Long> floatStoreIds, Boolean onSchedule) {
+            this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
+                    primaryAtStore, whatsappOptIn, emailOptIn, birthDate, floatStoreIds, onSchedule, null);
+        }
+
+        public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
+                Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
+                Boolean whatsappOptIn, Boolean emailOptIn, java.time.LocalDate birthDate,
+                java.util.List<Long> floatStoreIds) {
+            this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
+                    primaryAtStore, whatsappOptIn, emailOptIn, birthDate, floatStoreIds, null, null);
+        }
 
         public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
                 Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
@@ -100,7 +123,11 @@ public final class EmployeeDtos {
             java.time.LocalDate birthDate,
             /** Stores they may float to (empty = any store in the area), and their names. */
             java.util.List<Long> floatStoreIds,
-            java.util.List<String> floatStoreNames) {
+            java.util.List<String> floatStoreNames,
+            /** Works shifts and is on the schedule (managers can be off it). */
+            boolean onSchedule,
+            /** The admin who recorded their agreement to texts (null if they turned texts on themselves). */
+            String smsConsentBy) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -130,7 +157,9 @@ public final class EmployeeDtos {
                             com.example.schedulingsoftware.store.Store::getName)).map(
                                     com.example.schedulingsoftware.store.Store::getId).toList(),
                     e.getFloatStores().stream().map(com.example.schedulingsoftware.store.Store::getName).sorted()
-                            .toList());
+                            .toList(),
+                    e.isOnSchedule(),
+                    e.isSmsOptIn() ? e.getSmsConsentBy() : null);
         }
     }
 
