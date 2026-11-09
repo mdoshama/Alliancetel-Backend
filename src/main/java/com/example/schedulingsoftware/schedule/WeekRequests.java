@@ -317,8 +317,10 @@ public class WeekRequests {
                 .collect(Collectors.groupingBy(r -> r.getEmployee().getId()));
         return staff.stream().filter(WeekRequests::needsDayOff).map(e -> {
             List<DayOffRequest> all = byPerson.getOrDefault(e.getId(), List.of());
-            List<DayOffRequest> mine = all.stream().filter(r -> !r.isReserved()).toList();
-            boolean hasReserved = all.stream().anyMatch(DayOffRequest::isReserved);
+            // A regular day off counts as their own choice (a manager set it with them); only days the system
+            // picked mean they haven't chosen yet.
+            List<DayOffRequest> mine = all.stream().filter(r -> !r.isReserved() || r.isRegular()).toList();
+            boolean hasReserved = all.stream().anyMatch(r -> r.isReserved() && !r.isRegular());
             State state;
             if (fullWeek.contains(e.getId())) {
                 int asked = (int) all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).count();
@@ -348,6 +350,11 @@ public class WeekRequests {
     /** Someone who works every day of the week has no day off to ask for. */
     private static boolean needsDayOff(Employee e) {
         return e.getWorkDaysPerWeek() < 7;
+    }
+
+    /** Active people in the area who work shifts (the ones the schedule is made for). */
+    public List<Employee> staffOf(Long areaId) {
+        return staff(areaId);
     }
 
     private List<Employee> staff(Long areaId) {

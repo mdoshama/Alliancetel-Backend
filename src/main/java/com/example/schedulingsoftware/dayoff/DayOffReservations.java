@@ -32,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 public class DayOffReservations {
 
     static final String RESERVED_REASON = "Reserved by the system";
+    static final String REGULAR_REASON = "Regular day off";
 
     private final DayOffRequestRepository repository;
     private final WeekRequests weekRequests;
@@ -142,7 +143,8 @@ public class DayOffReservations {
             return 0;
         }
         LocalDate today = portal.today();
-        int n = 0;
+        // Regular days off first, whatever the staffing: managers decide on them (they're never approved here).
+        int n = reserveRegularDays(areaId, weekStart, today);
         for (WeekRequests.Suggestion s : weekRequests.suggestFor(areaId, weekStart)) {
             // Only future days, and never twice on the same date.
             LocalDate date = s.options().stream().filter(d -> d.isAfter(today)).findFirst().orElse(null);
@@ -160,6 +162,73 @@ public class DayOffReservations {
             n++;
         }
         return n;
+    }
+
+    /**
+     * Reserves each person's regular days off in that week, up to their usual number of days off, even when the
+     * stores would be short or a colleague at the same store is off too: it stays pending and managers decide. A day
+     * they already have any request for (including one turned down this week) is left alone.
+     */
+    private int reserveRegularDays(Long areaId, LocalDate weekStart, LocalDate today) {
+        LocalDate week = DayOffService.weekStart(weekStart);
+        java.util.Set<Long> fullWeek = weekRequests.fullWeekIds(areaId, week);
+        int n = 0;
+        for (Employee e : weekRequests.staffOf(areaId)) {
+            if (e.getRegularDaysOff().isEmpty() || fullWeek.contains(e.getId())) {
+                continue;
+            }
+            int usual = Math.max(0, 7 - e.getWorkDaysPerWeek());
+            long already = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(e.getId(), week,
+                    week.plusDays(6), List.of(DayOffStatus.PENDING, DayOffStatus.APPROVED))
+                    + repository.findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week,
+                            week.plusDays(6)).stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).count();
+            for (java.time.DayOfWeek dow : e.getRegularDaysOff().stream().sorted().toList()) {
+                if (already >= usual) {
+                    break;
+                }
+                LocalDate date = week.plusDays(dow.getValue() - 1L);
+                if (!date.isAfter(today) || repository.existsByEmployeeIdAndOffDate(e.getId(), date)) {
+                    continue;
+                }
+                DayOffRequest r = new DayOffRequest();
+                r.setEmployee(e);
+                r.setOffDate(date);
+                r.setReason(REGULAR_REASON);
+                r.setReserved(true);
+                r.setRegular(true);
+                r.setStatus(DayOffStatus.PENDING);
+                repository.save(r);
+                already++;
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * A manager or admin changed someone's regular days off: their days the system reserved in weeks still open
+     * (and not published) are dropped and reserved again, so the new regular days show up right away. Days they
+     * asked for themselves, and anything already approved or turned down, are kept.
+     */
+    @Transactional
+    public void replanFor(Employee e) {
+        if (!enabled || e.getArea() == null) {
+            return;
+        }
+        Long areaId = e.getArea().getId();
+        for (LocalDate week : portal.reservableWeeks()) {
+            if (published(areaId, week)) {
+                continue;
+            }
+            List<DayOffRequest> held = repository
+                    .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
+                    .stream().filter(r -> r.getStatus() == DayOffStatus.PENDING).toList();
+            if (!held.isEmpty()) {
+                repository.deleteAll(held);
+                repository.flush();
+            }
+            reserveWeek(areaId, week);
+        }
     }
 
     /** After a request was turned down or cancelled: reserves the day they're now missing, if the week allows. */
@@ -184,7 +253,9 @@ public class DayOffReservations {
         List<DayOffRequest> reserved = repository
                 .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
                 .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
-                .sorted(java.util.Comparator.comparing((DayOffRequest r) -> r.getStatus() == DayOffStatus.APPROVED))
+                // Approved last, and a regular day off after other reserved days.
+                .sorted(java.util.Comparator.comparing((DayOffRequest r) -> r.getStatus() == DayOffStatus.APPROVED)
+                        .thenComparing(DayOffRequest::isRegular))
                 .toList();
         if (reserved.isEmpty() || published(e.getArea() == null ? null : e.getArea().getId(), week)) {
             return List.of();

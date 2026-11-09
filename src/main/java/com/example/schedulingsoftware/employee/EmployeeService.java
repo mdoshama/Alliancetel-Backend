@@ -201,6 +201,27 @@ public class EmployeeService {
      * Moves someone to another store in their area (or clears it). Managers can do this for their own area,
      * which is how day-to-day rotations between stores are handled.
      */
+    /** Days of the week someone is normally off; no more than their usual number of days off. */
+    @Transactional
+    public void setRegularDaysOff(Long id, java.util.List<java.time.DayOfWeek> days) {
+        Employee employee = getEmployee(id);
+        accessPolicy.requireManagerOf(employee.getArea() == null ? null : employee.getArea().getId());
+        java.util.Set<java.time.DayOfWeek> set = new java.util.TreeSet<>();
+        if (days != null) {
+            days.stream().filter(java.util.Objects::nonNull).forEach(set::add);
+        }
+        int usual = Math.max(0, 7 - employee.getWorkDaysPerWeek());
+        if (set.size() > usual) {
+            throw new BusinessRuleException(employee.getFirstName() + " works " + employee.getWorkDaysPerWeek()
+                    + " days a week, so they can have " + (usual == 0 ? "no regular day off"
+                            : usual == 1 ? "1 regular day off" : usual + " regular days off")
+                    + ".");
+        }
+        employee.getRegularDaysOff().clear();
+        employee.getRegularDaysOff().addAll(set);
+        employeeRepository.flush();
+    }
+
     @Transactional
     public EmployeeResponse changeHomeStore(Long id, Long storeId) {
         return changeHomeStore(id, storeId, null);

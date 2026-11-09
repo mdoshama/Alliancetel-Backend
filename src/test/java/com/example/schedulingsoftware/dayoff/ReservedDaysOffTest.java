@@ -259,4 +259,94 @@ class ReservedDaysOffTest {
                 .days().stream().filter(c -> c.type() != com.example.schedulingsoftware.schedule.DayType.WORK).count();
         assertTrue(annaOff >= 1, "her approved reserved day is off on the schedule");
     }
+
+    // ---- Regular days off -------------------------------------------------------------------------------------
+
+    /** A day in the open week that is still ahead (reservations are only made for days after today). */
+    private LocalDate futureDay(int skip) {
+        return week.datesUntil(week.plusDays(7)).filter(d -> d.isAfter(portal.today())).skip(skip).findFirst()
+                .orElseThrow();
+    }
+
+    private void setRegular(Long employee, java.time.DayOfWeek... days) {
+        employeeService.setRegularDaysOff(employee, List.of(days));
+        reservations.replanFor(employeeService.getEmployee(employee));
+    }
+
+    private DayOffRequest onDay(Long employee, LocalDate date) {
+        return daysOff(employee).stream().filter(r -> r.getOffDate().equals(date)).findFirst().orElse(null);
+    }
+
+    @Test
+    void aRegularDayOffIsReservedEvenWhenItLeavesTheStoreTightAndStaysPending() {
+        LocalDate tue = futureDay(1);
+        // Anna and Ben both work at North (needs 1) and both normally take the same day.
+        setRegular(anna, tue.getDayOfWeek());
+        setRegular(ben, tue.getDayOfWeek());
+        for (Long who : List.of(anna, ben)) {
+            DayOffRequest r = onDay(who, tue);
+            assertTrue(r != null && r.isReserved() && r.isRegular(), "regular day reserved");
+            assertEquals(DayOffStatus.PENDING, r.getStatus(), "never approved automatically");
+            assertEquals(1, daysOff(who).size(), "still only their usual one day off");
+        }
+    }
+
+    @Test
+    void aRegularDayIsNotMovedWhenSomeoneElsesRequestIsApproved() {
+        LocalDate day = futureDay(2);
+        setRegular(cara, day.getDayOfWeek());
+        Long regularId = onDay(cara, day).getId();
+        // Dee (same store) can't simply ask for it: it's Cara's standing day, like a real request.
+        TestUsers.signInAs(dee, Role.EMPLOYEE, area);
+        assertThrows(BusinessRuleException.class,
+                () -> dayOffService.create(new CreateDayOffRequest(dee, List.of(day), null, null)));
+        // An emergency still can be sent; approving it leaves Cara's regular day where it is.
+        Long emergency = dayOffService.create(new CreateDayOffRequest(dee, List.of(day), "Urgent", true)).getFirst().id();
+        TestUsers.signInAsAdmin();
+        dayOffService.approve(emergency, null);
+        assertTrue(requests.findById(regularId).isPresent(), "regular day stays");
+        assertEquals(DayOffStatus.PENDING, requests.findById(regularId).orElseThrow().getStatus());
+    }
+
+    @Test
+    void changingTheRegularDayMovesTheReservation() {
+        LocalDate first = futureDay(1);
+        LocalDate second = futureDay(3);
+        setRegular(anna, first.getDayOfWeek());
+        assertTrue(onDay(anna, first).isRegular());
+        setRegular(anna, second.getDayOfWeek());
+        assertEquals(null, onDay(anna, first), "old regular day given back");
+        assertTrue(onDay(anna, second).isRegular());
+        // Clearing them: the system picks a day again, as before.
+        setRegular(anna);
+        assertEquals(1, daysOff(anna).size());
+        assertFalse(daysOff(anna).getFirst().isRegular());
+    }
+
+    @Test
+    void someoneWithARegularDayCountsAsHavingChosen() {
+        assertTrue(weekRequests.reservedOnlyNames(area, week).stream().anyMatch(n -> n.startsWith("Anna")));
+        setRegular(anna, futureDay(1).getDayOfWeek());
+        assertFalse(weekRequests.reservedOnlyNames(area, week).stream().anyMatch(n -> n.startsWith("Anna")),
+                "her regular day is her choice, so the week doesn't wait for her");
+    }
+
+    @Test
+    void noMoreRegularDaysThanTheirUsualDaysOff() {
+        BusinessRuleException tooMany = assertThrows(BusinessRuleException.class,
+                () -> employeeService.setRegularDaysOff(anna, List.of(java.time.DayOfWeek.MONDAY,
+                        java.time.DayOfWeek.TUESDAY)));
+        assertTrue(tooMany.getMessage().contains("1 regular day off"), tooMany.getMessage());
+        // Dee works 5 days: two regular days are fine.
+        setRegular(dee, futureDay(0).getDayOfWeek(), futureDay(2).getDayOfWeek());
+        assertEquals(2, daysOff(dee).stream().filter(DayOffRequest::isRegular).count());
+    }
+
+    @Test
+    void managersOfAnotherAreaCannotSetThem() {
+        Long other = areaService.create(new AreaRequest("Elsewhere", null, true)).id();
+        TestUsers.signInAs(999L, Role.MANAGER, other);
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> employeeService.setRegularDaysOff(anna, List.of(java.time.DayOfWeek.MONDAY)));
+    }
 }

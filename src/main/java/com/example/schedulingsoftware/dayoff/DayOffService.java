@@ -95,25 +95,28 @@ public class DayOffService {
     @Transactional(readOnly = true)
     public PageResponse<DayOffResponse> page(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to, String query, Integer page, Integer size) {
-        return page(requestedAreaId, requestedEmployeeId, status, from, to, query, null, page, size);
+        return page(requestedAreaId, requestedEmployeeId, status, from, to, query, null, null, page, size);
     }
 
-    /** Same, optionally only reserved days ({@code reserved = true}) or only ones people asked for ({@code false}). */
+    /**
+     * Same, optionally only reserved days ({@code reserved = true}) or only ones people asked for ({@code false}),
+     * and only regular days off ({@code regular = true}) or none of them ({@code false}).
+     */
     @Transactional(readOnly = true)
     public PageResponse<DayOffResponse> page(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
-            LocalDate from, LocalDate to, String query, Boolean reserved, Integer page, Integer size) {
-        var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query, reserved);
+            LocalDate from, LocalDate to, String query, Boolean reserved, Boolean regular, Integer page, Integer size) {
+        var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query, reserved, regular);
         return PageResponse.from(repository.findAll(spec, PageResponse.request(page, size, Sort.by("offDate", "id"))),
                 DayOffResponse::from);
     }
 
     private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to, String query) {
-        return filter(requestedAreaId, requestedEmployeeId, status, from, to, query, null);
+        return filter(requestedAreaId, requestedEmployeeId, status, from, to, query, null, null);
     }
 
     private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
-            LocalDate from, LocalDate to, String query, Boolean reserved) {
+            LocalDate from, LocalDate to, String query, Boolean reserved, Boolean regular) {
         CurrentUser user = accessPolicy.current();
         Long areaId = accessPolicy.restrictToArea(requestedAreaId);
         // Employees only ever see their own requests.
@@ -131,6 +134,9 @@ public class DayOffService {
             }
             if (reserved != null) {
                 predicates.add(cb.equal(root.get("reserved"), reserved));
+            }
+            if (regular != null) {
+                predicates.add(cb.equal(root.get("regular"), regular));
             }
             if (from != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("offDate"), from));
@@ -196,6 +202,7 @@ public class DayOffService {
                     && !override) {
                 // Now their own request; still waiting for a manager unless one already approved it.
                 existing.setReserved(false);
+                existing.setRegular(false);
                 existing.setReason(InputRules.clean(request.reason()));
                 confirmed.add(DayOffResponse.from(existing));
                 it.remove();
@@ -244,7 +251,7 @@ public class DayOffService {
                 DayOffRequest real = repository.findSameStore(employee.getHomeStore().getId(), employee.getId(),
                         dates.first(), dates.last(), OPEN_STATUSES).stream()
                         .filter(r -> dates.contains(r.getOffDate())
-                                && !(r.isReserved() && r.getStatus() == DayOffStatus.PENDING))
+                                && !r.isMovable())
                         .findFirst().orElse(null);
                 if (real != null) {
                     throw new BusinessRuleException(real.getEmployee().getFirstName() + " already has "
@@ -292,7 +299,7 @@ public class DayOffService {
         }
         // Only ones nobody approved yet can move; a reserved day a manager approved stays.
         return repository.findForAreaOnDate(area, date, List.of(DayOffStatus.PENDING)).stream()
-                .filter(r -> r.isReserved() && !r.getEmployee().getId().equals(employee.getId()))
+                .filter(r -> r.isMovable() && !r.getEmployee().getId().equals(employee.getId()))
                 .toList();
     }
 
@@ -452,7 +459,7 @@ public class DayOffService {
         // A colleague's reserved day isn't shown as taken: asking for it moves their reservation to another day.
         return repository.findSameStore(employee.getHomeStore().getId(), employee.getId(), from, to, OPEN_STATUSES)
                 .stream()
-                .filter(r -> !(r.isReserved() && r.getStatus() == DayOffStatus.PENDING))
+                .filter(r -> !r.isMovable())
                 .map(r -> new TakenDay(r.getOffDate(), r.getEmployee().getFirstName(), r.getStatus()))
                 .toList();
     }
@@ -485,7 +492,7 @@ public class DayOffService {
         List<DayOffRequest> aside = new ArrayList<>();
         if (e.getHomeStore() != null) {
             repository.findSameStore(e.getHomeStore().getId(), e.getId(), date, date, OPEN_STATUSES).stream()
-                    .filter(o -> o.isReserved() && o.getStatus() == DayOffStatus.PENDING).forEach(aside::add);
+                    .filter(DayOffRequest::isMovable).forEach(aside::add);
         }
         aside.forEach(reservations::moveAside);
         for (DayOffRequest other : reservedOthersOn(e, date)) {

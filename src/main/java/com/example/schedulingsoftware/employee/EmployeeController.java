@@ -31,6 +31,7 @@ public class EmployeeController {
 
     private final EmployeeService employeeService;
     private final BirthdayService birthdayService;
+    private final com.example.schedulingsoftware.dayoff.DayOffReservations reservations;
 
     /** Birthdays in the next "days" days (default 30), soonest first. Admins: all areas; managers: their own. */
     @GetMapping("/birthdays")
@@ -84,6 +85,18 @@ public class EmployeeController {
     @PatchMapping("/{id}/home-store")
     public EmployeeResponse changeHomeStore(@PathVariable Long id, @RequestBody HomeStoreRequest request) {
         return employeeService.changeHomeStore(id, request.storeId(), request.primary());
+    }
+
+    /**
+     * Sets the days of the week someone is normally off (managers of their area, admins). Days the system holds
+     * for them in weeks still open are reserved again on the new days.
+     */
+    @PutMapping("/{id}/regular-days-off")
+    public EmployeeResponse setRegularDaysOff(@PathVariable Long id,
+            @Valid @RequestBody EmployeeDtos.RegularDaysOffRequest request) {
+        employeeService.setRegularDaysOff(id, request.days());
+        reservations.replanFor(employeeService.getEmployee(id));
+        return employeeService.findById(id);
     }
 
     @PostMapping("/{id}/reset-password")

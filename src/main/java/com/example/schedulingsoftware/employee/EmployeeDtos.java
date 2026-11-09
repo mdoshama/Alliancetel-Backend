@@ -127,7 +127,9 @@ public final class EmployeeDtos {
             /** Works shifts and is on the schedule (managers can be off it). */
             boolean onSchedule,
             /** The admin who recorded their agreement to texts (null if they turned texts on themselves). */
-            String smsConsentBy) {
+            String smsConsentBy,
+            /** Days of the week they're normally off, Monday first. */
+            java.util.List<java.time.DayOfWeek> regularDaysOff) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -159,8 +161,13 @@ public final class EmployeeDtos {
                     e.getFloatStores().stream().map(com.example.schedulingsoftware.store.Store::getName).sorted()
                             .toList(),
                     e.isOnSchedule(),
-                    e.isSmsOptIn() ? e.getSmsConsentBy() : null);
+                    e.isSmsOptIn() ? e.getSmsConsentBy() : null,
+                    e.getRegularDaysOff().stream().sorted().toList());
         }
+    }
+
+    /** Days of the week someone is normally off (empty clears them). */
+    public record RegularDaysOffRequest(@jakarta.validation.constraints.NotNull java.util.List<java.time.DayOfWeek> days) {
     }
 
     /** Returned once when an account is created or its password reset; the password is never stored in plain text. */

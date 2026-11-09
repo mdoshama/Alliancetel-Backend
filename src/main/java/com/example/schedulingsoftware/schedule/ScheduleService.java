@@ -667,7 +667,7 @@ public class ScheduleService {
         Map<Long, String> asked = new LinkedHashMap<>();
         for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, date, openStatuses)) {
             Employee e = r.getEmployee();
-            if (reservedCanMove && r.isReserved() && r.getStatus() == DayOffStatus.PENDING) {
+            if (reservedCanMove && r.isMovable()) {
                 continue;
             }
             if (e.worksShifts() && !e.getId().equals(employee.getId())) {
@@ -1154,7 +1154,8 @@ public class ScheduleService {
                                 .thenComparing(DayOffRequest::getId))
                         .map(r -> new WeekRequest(r.getId(), r.getEmployee().getId(), r.getEmployee().getFullName(),
                                 r.getOffDate(), r.isEmergency(), r.getReason(),
-                                !me.isEmployee() && !r.getEmployee().getId().equals(me.id()), r.isReserved()))
+                                !me.isEmployee() && !r.getEmployee().getId().equals(me.id()), r.isReserved(),
+                                r.isRegular()))
                         .toList();
         Map<String, WeekRequest> requestByDay = new HashMap<>();
         requests.forEach(r -> requestByDay.putIfAbsent(r.employeeId() + "|" + r.date(), r));

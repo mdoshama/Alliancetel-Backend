@@ -96,7 +96,9 @@ public final class ScheduleDtos {
     public record WeekRequest(Long id, Long employeeId, String employeeName, LocalDate date, boolean emergency,
             String reason, boolean canReview,
             /** Reserved by the system (not asked for by the person); approved like any request. */
-            boolean reserved) {
+            boolean reserved,
+            /** Reserved because it is one of their regular days off. */
+            boolean regular) {
     }
 
     public record EmployeeRow(

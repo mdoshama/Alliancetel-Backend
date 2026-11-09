@@ -128,12 +128,14 @@ public final class DayOffDtos {
             /** After approval: how that week's existing schedule was updated, or null if there was none. */
             String scheduleUpdate,
             /** Reserved by the system; gives way when they ask for another day. */
-            boolean reserved) {
+            boolean reserved,
+            /** Reserved because it is one of their regular days off. */
+            boolean regular) {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, update, reserved);
+                    decisionChangeReason, decisionChangedAt, update, reserved, regular);
         }
 
         public static DayOffResponse from(DayOffRequest r) {
@@ -158,7 +160,8 @@ public final class DayOffDtos {
                     r.getDecisionChangeReason(),
                     r.getDecisionChangedAt(),
                     null,
-                    r.isReserved());
+                    r.isReserved(),
+                    r.isRegular());
         }
     }
 }

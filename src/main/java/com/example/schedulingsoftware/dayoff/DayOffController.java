@@ -65,9 +65,10 @@ public class DayOffController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false, name = "q") String query,
             @RequestParam(required = false) Boolean reserved,
+            @RequestParam(required = false) Boolean regular,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
-        return dayOffService.page(areaId, employeeId, status, from, to, query, reserved, page, size);
+        return dayOffService.page(areaId, employeeId, status, from, to, query, reserved, regular, page, size);
     }
 
     @PostMapping

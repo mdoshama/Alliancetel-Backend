@@ -61,9 +61,25 @@ public class DayOffRequest {
     @org.hibernate.annotations.ColumnDefault("false")
     private boolean reserved;
 
+    /**
+     * Reserved because it is one of the person's regular days off (set by a manager or admin). Like any reserved day
+     * it waits for a decision, but it is never moved to another day automatically: managers handle it.
+     */
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("false")
+    private boolean regular;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DayOffStatus status = DayOffStatus.PENDING;
+
+    /**
+     * Only held by the system and still waiting, so it can give way to someone's real request. A regular day off is
+     * never movable: it is that person's standing day.
+     */
+    public boolean isMovable() {
+        return reserved && !regular && status == DayOffStatus.PENDING;
+    }
 
     @Column(length = 255)
     private String reviewNote;

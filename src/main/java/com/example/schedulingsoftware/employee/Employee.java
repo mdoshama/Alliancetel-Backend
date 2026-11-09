@@ -87,6 +87,18 @@ public class Employee {
     @Column(nullable = false)
     private int workDaysPerWeek = DEFAULT_WORK_DAYS_PER_WEEK;
 
+    /**
+     * Days of the week this person is normally off (set by managers and admins). When a week opens for requests,
+     * these are reserved for them first; they still wait for approval like any reserved day.
+     */
+    @jakarta.persistence.ElementCollection(fetch = FetchType.EAGER)
+    @jakarta.persistence.CollectionTable(name = "employee_regular_days_off",
+            joinColumns = @JoinColumn(name = "employee_id"))
+    @Column(name = "day_of_week", nullable = false, length = 10)
+    @Enumerated(EnumType.STRING)
+    @org.hibernate.annotations.BatchSize(size = 100)
+    private java.util.Set<java.time.DayOfWeek> regularDaysOff = new java.util.HashSet<>();
+
     @Column(nullable = false)
     private boolean active = true;
 
