@@ -98,7 +98,8 @@ class EmailIntegrationTest {
 
     @Test
     void dayOffDecisionsAndAnnouncementsAreEmailedToo() {
-        Long r = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday.plusDays(2)), null, null)).getFirst().id();
+        // Emergencies are decided by a manager, and the person hears about it.
+        Long r = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday.plusDays(2)), "Urgent", true)).getFirst().id();
         dayOffService.approve(r, "Have fun");
         Notification decision = to(ana).getFirst();
         assertTrue(decision.getSubject().matches("Your day off on \\w+, \\w+ \\d+ was approved"), decision.getSubject());

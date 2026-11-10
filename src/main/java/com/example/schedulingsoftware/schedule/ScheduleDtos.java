@@ -85,7 +85,15 @@ public final class ScheduleDtos {
             /** The assigned store is closed that day (e.g. hours changed after it was set by hand). */
             boolean storeClosed,
             /** A pending day-off request for this day (managers only), or null. */
-            WeekRequest request) {
+            WeekRequest request,
+            /** On an approved day off: the request it comes from, so a manager can revoke it here (managers only). */
+            Long approvedRequestId,
+            /**
+             * On an approved day off, where it came from: REQUESTED (they asked), REGULAR (their regular day off),
+             * RESERVED (the system gave it; employees see ASSIGNED), EMERGENCY (approved emergency) or MANAGER (given
+             * by a manager); null otherwise.
+             */
+            String offSource) {
     }
 
     /**

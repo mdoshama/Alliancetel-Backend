@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.schedulingsoftware.dayoff.DayOffService;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.AddToStoreRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.GenerateScheduleRequest;
 import com.example.schedulingsoftware.schedule.ScheduleDtos.MoveForWeekRequest;
@@ -32,9 +33,11 @@ public class ScheduleController {
 
     private final ScheduleService scheduleService;
     private final WeekRequests weekRequests;
-    private final com.example.schedulingsoftware.dayoff.DayOffService dayOffService;
+    private final DayOffService dayOffService;
     private final FullWeekService fullWeekService;
     private final com.example.schedulingsoftware.employee.EmployeeService employeeService;
+    private final com.example.schedulingsoftware.dayoff.DayOffReservations reservations;
+    private final com.example.schedulingsoftware.auth.AccessPolicy accessPolicy;
 
     private Long employeeArea(Long employeeId) {
         var area = employeeService.getEmployee(employeeId).getArea();
@@ -86,6 +89,13 @@ public class ScheduleController {
 
     @PostMapping("/generate")
     public ScheduleResponse generate(@Valid @RequestBody GenerateScheduleRequest request) {
+        accessPolicy.requireManagerOf(request.areaId());
+        // Nobody is left without a day off: waiting requests are settled, regular days come first, then requests,
+        // and the system reserves the rest. A published week keeps the days it was published with.
+        if (!reservations.published(request.areaId(), DayOffService.weekStart(request.weekStart()))) {
+            dayOffService.settleWaitingRequests(request.areaId(), request.weekStart());
+            reservations.fillBeforeGenerating(request.areaId(), request.weekStart());
+        }
         return scheduleService.generate(request.areaId(), request.weekStart(), Boolean.TRUE.equals(request.force()));
     }
 
@@ -104,12 +114,6 @@ public class ScheduleController {
     @PostMapping("/{scheduleId}/exchange")
     public ScheduleResponse exchange(@PathVariable Long scheduleId, @Valid @RequestBody ExchangeRequest request) {
         return scheduleService.exchange(scheduleId, request.fromEntryId(), request.toEntryId(), request.storeId());
-    }
-
-    /** One person's work day and day off trade places (moving their day off within the week). */
-    @PostMapping("/{scheduleId}/swap-days")
-    public ScheduleResponse swapDays(@PathVariable Long scheduleId, @Valid @RequestBody SwapRequest request) {
-        return scheduleService.swapDays(scheduleId, request.entryIdA(), request.entryIdB());
     }
 
     /** Re-runs automatic store assignment, keeping days set by hand. */

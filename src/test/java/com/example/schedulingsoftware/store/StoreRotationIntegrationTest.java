@@ -230,8 +230,7 @@ class StoreRotationIntegrationTest {
 
     @Test
     void cannotSwapAcrossDaysOrAwayAnApprovedDayOff() {
-        Long request = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday), null, null)).getFirst().id();
-        dayOffService.approve(request, null);
+        dayOffService.create(new CreateDayOffRequest(ana, List.of(monday), null, null)); // given right away
         ScheduleResponse s = scheduleService.generate(area, monday);
 
         DayCell anaMonday = row(s, ana).days().get(0);
@@ -308,19 +307,13 @@ class StoreRotationIntegrationTest {
         DayCell off = days.stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         DayCell work = days.stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
 
-        ScheduleResponse moved = scheduleService.swapDays(s.id(), off.entryId(), work.entryId());
+        ScheduleResponse moved = scheduleService.exchange(s.id(), off.entryId(), work.entryId(), null);
         assertEquals(DayType.WORK, cell(moved, ana, off.entryId()).type());
         assertEquals(work.storeId(), cell(moved, ana, off.entryId()).storeId(), "the new work day keeps the store");
         assertEquals(DayType.OFF, cell(moved, ana, work.entryId()).type());
         assertNull(cell(moved, ana, work.entryId()).storeId());
         assertEquals(6, row(moved, ana).scheduledWorkDays(), "still 6 work days");
 
-        // Two work days, two people, or an approved day off: refused.
-        DayCell otherWork = row(moved, ana).days().stream()
-                .filter(c -> c.type() == DayType.WORK && !c.entryId().equals(off.entryId())).findFirst().orElseThrow();
-        assertThrows(BusinessRuleException.class, () -> scheduleService.swapDays(s.id(), off.entryId(), otherWork.entryId()));
-        DayCell benDay = row(moved, ben).days().getFirst();
-        assertThrows(BusinessRuleException.class, () -> scheduleService.swapDays(s.id(), work.entryId(), benDay.entryId()));
     }
 
     @Test
@@ -371,8 +364,7 @@ class StoreRotationIntegrationTest {
         assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), anaWeekday.entryId(), benSun.entryId(), chulaVista));
 
         // Ben (home Chula Vista) moved into Sunday falls back to... nothing open at his home, so an open store is needed.
-        Long req = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday.plusDays(3)), null, null)).getFirst().id();
-        dayOffService.approve(req, null);
+        dayOffService.create(new CreateDayOffRequest(ana, List.of(monday.plusDays(3)), null, null)); // given right away
         ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
         DayCell anaThuOff = row(after, ana).days().get(3);
         DayCell benWork = row(after, ben).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
@@ -423,13 +415,12 @@ class StoreRotationIntegrationTest {
     @Test
     void anApprovedDayOffCannotBeDraggedAway() {
         LocalDate wed = monday.plusDays(2);
-        Long req = dayOffService.create(new CreateDayOffRequest(ana, List.of(wed), null, null)).getFirst().id();
-        dayOffService.approve(req, null);
+        dayOffService.create(new CreateDayOffRequest(ana, List.of(wed), null, null)); // given right away
         ScheduleResponse s = scheduleService.generate(area, monday);
         DayCell approved = row(s, ana).days().stream().filter(c -> c.date().equals(wed)).findFirst().orElseThrow();
         DayCell work = row(s, ana).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
         assertEquals(DayType.REQUESTED_OFF, approved.type());
-        assertThrows(BusinessRuleException.class, () -> scheduleService.swapDays(s.id(), approved.entryId(), work.entryId()));
+        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), approved.entryId(), work.entryId(), null));
     }
 
     @Test

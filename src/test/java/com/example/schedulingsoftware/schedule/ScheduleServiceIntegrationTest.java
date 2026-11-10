@@ -59,9 +59,11 @@ class ScheduleServiceIntegrationTest {
         LocalDate tuesday = monday.plusDays(1);
 
         Long annaRequest = dayOffService.create(new CreateDayOffRequest(annaId, List.of(tuesday), "Doctor", null)).getFirst().id();
-        dayOffService.approve(annaRequest, null);
-        // Ben's request stays pending, so the scheduler should ignore it and report it.
-        dayOffService.create(new CreateDayOffRequest(benId, List.of(monday.plusDays(3)), null, null));
+        // Anna's day keeps the stores covered, so it was given right away.
+        assertEquals(com.example.schedulingsoftware.dayoff.DayOffStatus.APPROVED,
+                dayOffService.search(areaId, annaId, null, null, null).getFirst().status());
+        // Ben's emergency waits for a manager, so the scheduler leaves him working and reports it.
+        dayOffService.create(new CreateDayOffRequest(benId, List.of(monday.plusDays(3)), "Urgent", true));
 
         ScheduleResponse schedule = scheduleService.generate(areaId, monday.plusDays(4));
 

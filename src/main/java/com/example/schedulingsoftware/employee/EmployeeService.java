@@ -204,6 +204,16 @@ public class EmployeeService {
     /** Days of the week someone is normally off; no more than their usual number of days off. */
     @Transactional
     public void setRegularDaysOff(Long id, java.util.List<java.time.DayOfWeek> days) {
+        setRegularDaysOff(id, days, (e, set) -> { });
+    }
+
+    /**
+     * Same, with an extra check run once access and the count are confirmed (the staffing check, which lives with
+     * the day-off rules).
+     */
+    @Transactional
+    public void setRegularDaysOff(Long id, java.util.List<java.time.DayOfWeek> days,
+            java.util.function.BiConsumer<Employee, java.util.Set<java.time.DayOfWeek>> check) {
         Employee employee = getEmployee(id);
         accessPolicy.requireManagerOf(employee.getArea() == null ? null : employee.getArea().getId());
         java.util.Set<java.time.DayOfWeek> set = new java.util.TreeSet<>();
@@ -217,6 +227,7 @@ public class EmployeeService {
                             : usual == 1 ? "1 regular day off" : usual + " regular days off")
                     + ".");
         }
+        check.accept(employee, set);
         employee.getRegularDaysOff().clear();
         employee.getRegularDaysOff().addAll(set);
         employeeRepository.flush();

@@ -76,6 +76,24 @@ public class LiveUpdates {
         }
     }
 
+    /**
+     * For changes the server makes by itself (the hourly job reserving days off): tells every screen once the
+     * transaction has committed, so a screen that reloads sees the change.
+     */
+    public void publishSystemChange(String topic) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            publish(topic, null, null);
+                        }
+                    });
+        } else {
+            publish(topic, null, null);
+        }
+    }
+
     /** Whether this person's screens care about a change of this kind made in that area. */
     static boolean reaches(CurrentUser user, String topic, Long actorAreaId) {
         if (user.isBackOffice()) {

@@ -57,6 +57,9 @@ public class LiveChangeInterceptor implements HandlerInterceptor {
         if (path.startsWith("/api/time-clock")) {
             return "timeclock";
         }
+        if (path.startsWith("/api/eod")) {
+            return "eod";
+        }
         return null;
     }
 

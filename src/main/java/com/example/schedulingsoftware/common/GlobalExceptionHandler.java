@@ -80,6 +80,16 @@ public class GlobalExceptionHandler {
     }
 
     /** Anything unexpected: log it with details, but only tell the client that something went wrong. */
+    /**
+     * The browser went away mid-response (a tab closed, a phone went to sleep, a live stream dropped): nothing to
+     * answer and nothing wrong on the server.
+     */
+    @ExceptionHandler({ org.springframework.web.context.request.async.AsyncRequestNotUsableException.class,
+            org.springframework.web.context.request.async.AsyncRequestTimeoutException.class })
+    public void handleClientGone(Exception ex) {
+        log.debug("Client disconnected: {}", ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleUnexpected(Exception ex) throws Exception {
         if (ex instanceof org.springframework.web.ErrorResponse) {

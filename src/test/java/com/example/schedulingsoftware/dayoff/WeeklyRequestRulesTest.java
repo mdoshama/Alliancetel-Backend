@@ -134,7 +134,7 @@ class WeeklyRequestRulesTest {
 
         Long annaRequest = dayOffService.create(new CreateDayOffRequest(anna, List.of(week.plusDays(2)), null, null))
                 .getFirst().id();
-        dayOffService.reject(annaRequest, "Too busy");
+        dayOffService.changeDecision(annaRequest, DayOffStatus.REJECTED, "Too busy");
         WeekRequests.Status status = weekRequests.status(area, week);
         assertEquals(3, status.total());
         assertEquals(1, status.sent());

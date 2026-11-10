@@ -108,13 +108,6 @@ public class ScheduleGenerator {
         return counts;
     }
 
-    /** Counts of each day type for one employee. */
-    public static Map<DayType, Integer> tally(Map<LocalDate, DayType> days) {
-        Map<DayType, Integer> counts = new EnumMap<>(DayType.class);
-        days.values().forEach(t -> counts.merge(t, 1, Integer::sum));
-        return counts;
-    }
-
     private static int clamp(int workDays) {
         return Math.max(0, Math.min(7, workDays));
     }

@@ -162,7 +162,7 @@ class CapacityAndOverridesTest {
         // Flo can still take it: South is fine without one of its floaters.
         TestUsers.signInAs(f2, Role.EMPLOYEE, area);
         var ok = dayOffService.create(new CreateDayOffRequest(f2, List.of(day), "Trip", null));
-        assertEquals(DayOffStatus.PENDING, ok.getFirst().status());
+        assertEquals(DayOffStatus.APPROVED, ok.getFirst().status(), "covered, so given right away");
     }
 
     @Test

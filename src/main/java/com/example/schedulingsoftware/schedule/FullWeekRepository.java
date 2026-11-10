@@ -12,8 +12,6 @@ public interface FullWeekRepository extends JpaRepository<FullWeek, Long> {
 
     Optional<FullWeek> findByEmployeeIdAndWeekStart(Long employeeId, LocalDate weekStart);
 
-    boolean existsByEmployeeIdAndWeekStart(Long employeeId, LocalDate weekStart);
-
     @Query("select f from FullWeek f where f.employee.area.id = :areaId and f.weekStart = :weekStart")
     List<FullWeek> findForArea(@Param("areaId") Long areaId, @Param("weekStart") LocalDate weekStart);
 }

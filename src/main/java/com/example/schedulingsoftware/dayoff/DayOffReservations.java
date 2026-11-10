@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.example.schedulingsoftware.area.Area;
 import com.example.schedulingsoftware.area.AreaRepository;
+import com.example.schedulingsoftware.common.BusinessRuleException;
 import com.example.schedulingsoftware.employee.Employee;
 import com.example.schedulingsoftware.schedule.ScheduleService;
 import com.example.schedulingsoftware.schedule.ScheduleStatus;
@@ -42,12 +43,15 @@ public class DayOffReservations {
     private final RequestPortal portal;
     private final boolean enabled;
     private final boolean backgroundJobs;
+    private final com.example.schedulingsoftware.live.LiveUpdates liveUpdates;
 
     public DayOffReservations(DayOffRequestRepository repository, WeekRequests weekRequests,
             AreaRepository areaRepository, WeeklyScheduleRepository scheduleRepository,
             ScheduleService scheduleService, RequestPortal portal,
             @Value("${alliancetel.scheduling.reserve-days-off:true}") boolean enabled,
-            @Value("${alliancetel.background-jobs:true}") boolean backgroundJobs) {
+            @Value("${alliancetel.background-jobs:true}") boolean backgroundJobs,
+            com.example.schedulingsoftware.live.LiveUpdates liveUpdates) {
+        this.liveUpdates = liveUpdates;
         this.backgroundJobs = backgroundJobs;
         this.repository = repository;
         this.weekRequests = weekRequests;
@@ -70,6 +74,7 @@ public class DayOffReservations {
         int n = reserveUpcoming();
         if (n > 0) {
             log.info("Reserved {} day(s) off", n);
+            liveUpdates.publishSystemChange("dayoff");
         }
     }
 
@@ -142,6 +147,22 @@ public class DayOffReservations {
         if (!enabled || published(areaId, weekStart)) {
             return 0;
         }
+        return fill(areaId, weekStart);
+    }
+
+    /**
+     * Right before a week is generated: makes sure everyone has their days off. In order: their regular day off,
+     * then what they asked for (already in), and for anyone still short the system reserves the best days (stores
+     * covered, one person per store, primaries, secondaries and floaters respected). Generating then gives them.
+     * Runs whatever the request window or the reservation switch says, since the week is being made now.
+     */
+    @Transactional
+    public int fillBeforeGenerating(Long areaId, LocalDate anyDayInWeek) {
+        LocalDate week = DayOffService.weekStart(anyDayInWeek);
+        return published(areaId, week) ? 0 : fill(areaId, week);
+    }
+
+    private int fill(Long areaId, LocalDate weekStart) {
         LocalDate today = portal.today();
         // Regular days off first, whatever the staffing: managers decide on them (they're never approved here).
         int n = reserveRegularDays(areaId, weekStart, today);
@@ -206,6 +227,49 @@ public class DayOffReservations {
     }
 
     /**
+     * Checks new regular days off before they're saved, so the same weekday can't be given to too many people:
+     * only one person per store on a weekday, and with everyone who has that weekday off the stores must still be
+     * covered (primaries stay at their store, floaters only cover their own stores).
+     */
+    public void checkRegularDays(Employee e, java.util.Set<java.time.DayOfWeek> days) {
+        if (e.getArea() == null || days.isEmpty()) {
+            return;
+        }
+        Long areaId = e.getArea().getId();
+        List<Employee> staff = weekRequests.staffOf(areaId);
+        LocalDate tomorrow = portal.today().plusDays(1);
+        for (java.time.DayOfWeek dow : days) {
+            String dayName = dow.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US);
+            List<Employee> sameDay = staff.stream()
+                    .filter(o -> !o.getId().equals(e.getId()) && o.getRegularDaysOff().contains(dow))
+                    .toList();
+            if (e.getHomeStore() != null) {
+                Employee colleague = sameDay.stream()
+                        .filter(o -> o.getHomeStore() != null && o.getHomeStore().getId().equals(e.getHomeStore().getId()))
+                        .findFirst().orElse(null);
+                if (colleague != null) {
+                    throw new BusinessRuleException(colleague.getFullName() + " already has " + dayName + "s off at "
+                            + e.getHomeStore().getName() + ". Only one person per store can be off on the same day, "
+                            + "so pick another day for " + e.getFirstName() + ".");
+                }
+            }
+            java.util.Set<Long> off = new java.util.HashSet<>();
+            sameDay.forEach(o -> off.add(o.getId()));
+            off.add(e.getId());
+            LocalDate date = tomorrow.with(java.time.temporal.TemporalAdjusters.nextOrSame(dow));
+            int shortBy = scheduleService.shortWith(areaId, date, off);
+            if (shortBy > 0) {
+                String others = sameDay.isEmpty() ? ""
+                        : " (" + String.join(", ", sameDay.stream().map(Employee::getFirstName).limit(6).toList())
+                                + (sameDay.size() == 1 ? " is" : " are") + " already off every " + dayName + ")";
+                throw new BusinessRuleException("With " + e.getFirstName() + " off every " + dayName + " too, the "
+                        + "stores would be " + shortBy + (shortBy == 1 ? " person" : " people") + " short" + others
+                        + ". Pick another day.");
+            }
+        }
+    }
+
+    /**
      * A manager or admin changed someone's regular days off: their days the system reserved in weeks still open
      * (and not published) are dropped and reserved again, so the new regular days show up right away. Days they
      * asked for themselves, and anything already approved or turned down, are kept.
@@ -250,17 +314,19 @@ public class DayOffReservations {
     public List<LocalDate> trim(Employee e, LocalDate anyDayInWeek) {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
         // Reserved days still in play (not turned down), the ones not yet approved given back first.
+        // A regular day off is never given back: it comes first. Only days the system picked are.
         List<DayOffRequest> reserved = repository
                 .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
-                .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
-                // Approved last, and a regular day off after other reserved days.
-                .sorted(java.util.Comparator.comparing((DayOffRequest r) -> r.getStatus() == DayOffStatus.APPROVED)
-                        .thenComparing(DayOffRequest::isRegular))
+                .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED && !r.isRegular())
+                // Approved last.
+                .sorted(java.util.Comparator.comparing((DayOffRequest r) -> r.getStatus() == DayOffStatus.APPROVED))
                 .toList();
         if (reserved.isEmpty() || published(e.getArea() == null ? null : e.getArea().getId(), week)) {
             return List.of();
         }
-        long own = ownDaysOff(e, week);
+        long own = ownDaysOff(e, week) + repository
+                .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
+                .stream().filter(r -> r.isRegular() && r.getStatus() != DayOffStatus.REJECTED).count();
         int usual = Math.max(0, 7 - e.getWorkDaysPerWeek());
         long extra = own + reserved.size() - usual;
         java.util.ArrayList<LocalDate> released = new java.util.ArrayList<>();
@@ -296,7 +362,8 @@ public class DayOffReservations {
                 week.plusDays(6), List.of(DayOffStatus.APPROVED));
     }
 
-    private boolean published(Long areaId, LocalDate weekStart) {
+    /** Whether that week's schedule is published (published weeks keep the days off they were published with). */
+    public boolean published(Long areaId, LocalDate weekStart) {
         return areaId != null && scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
                 .map(w -> w.getStatus() == ScheduleStatus.PUBLISHED).orElse(false);
     }

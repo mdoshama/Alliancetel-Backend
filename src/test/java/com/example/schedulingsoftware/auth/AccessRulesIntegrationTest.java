@@ -94,12 +94,11 @@ class AccessRulesIntegrationTest {
         TestUsers.signInAs(sdEmployee, Role.EMPLOYEE, sanDiego);
         assertThrows(AccessDeniedException.class, () ->
                 dayOffService.create(new CreateDayOffRequest(laEmployee, List.of(nextMonday), null, null)));
-        Long requestId = dayOffService.create(new CreateDayOffRequest(sdEmployee, List.of(nextMonday), null, null))
-                .getFirst().id();
+        var given = dayOffService.create(new CreateDayOffRequest(sdEmployee, List.of(nextMonday), null, null)).getFirst();
+        assertEquals(com.example.schedulingsoftware.dayoff.DayOffStatus.APPROVED, given.status(), "covered: given right away");
         assertEquals(1, dayOffService.search(null, null, null, null, null).size());
 
         TestUsers.signInAs(sdManager, Role.MANAGER, sanDiego);
-        dayOffService.approve(requestId, null);
         var draft = scheduleService.generate(sanDiego, nextMonday);
 
         TestUsers.signInAs(sdEmployee, Role.EMPLOYEE, sanDiego);
@@ -116,7 +115,7 @@ class AccessRulesIntegrationTest {
     @Test
     void managerCannotApproveOwnRequest() {
         TestUsers.signInAs(sdManager, Role.MANAGER, sanDiego);
-        Long own = dayOffService.create(new CreateDayOffRequest(sdManager, List.of(nextMonday), null, null)).getFirst().id();
+        Long own = dayOffService.create(new CreateDayOffRequest(sdManager, List.of(nextMonday), "Urgent", true)).getFirst().id();
         assertThrows(AccessDeniedException.class, () -> dayOffService.approve(own, null));
 
         TestUsers.signInAsAdmin();

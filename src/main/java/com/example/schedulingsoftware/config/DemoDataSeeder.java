@@ -134,13 +134,14 @@ public class DemoDataSeeder implements ApplicationRunner {
                         : (first + "." + last).toLowerCase(Locale.ROOT) + DEMO_DOMAIN;
                 Employee e = employeeRepository.save(employee("AT-" + code++, first, last, email, role, area, hash));
 
-                // A few sample requests: one approved single day, one pending two-day request.
+                // A few sample requests: one day already given, one emergency waiting for a manager.
                 if (i == 2) {
                     dayOffRepository.save(request(e, nextMonday.plusDays(2), DayOffStatus.APPROVED, "Family event"));
                 }
                 if (i == 4) {
-                    dayOffRepository.save(request(e, nextMonday.plusDays(4), DayOffStatus.PENDING, "Travel"));
-                    dayOffRepository.save(request(e, nextMonday.plusDays(5), DayOffStatus.PENDING, "Travel"));
+                    DayOffRequest urgent = request(e, nextMonday.plusDays(4), DayOffStatus.PENDING, "Family emergency");
+                    urgent.setEmergency(true);
+                    dayOffRepository.save(urgent);
                 }
             }
         }

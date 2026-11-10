@@ -167,7 +167,7 @@ class WhatsAppIntegrationTest {
         scheduleService.publish(s.id());
         notifications.deleteAll();
         LocalDate thu = monday.plusDays(3);
-        Long request = dayOffService.create(new CreateDayOffRequest(ana, List.of(thu), null, null)).getFirst().id();
+        Long request = dayOffService.create(new CreateDayOffRequest(ana, List.of(thu), "Urgent", true)).getFirst().id();
         dayOffService.approve(request, "Have fun");
 
         List<Notification> forAna = sentTo(ana);
@@ -176,7 +176,7 @@ class WhatsAppIntegrationTest {
         assertTrue(forAna.getFirst().getPreview().contains("was approved. Details: Note from your manager: Have fun Contact your manager"),
                 forAna.getFirst().getPreview());
 
-        Long second = dayOffService.create(new CreateDayOffRequest(dev, List.of(monday.plusDays(4)), null, null)).getFirst().id();
+        Long second = dayOffService.create(new CreateDayOffRequest(dev, List.of(monday.plusDays(4)), "Urgent", true)).getFirst().id();
         dayOffService.reject(second, null);
         assertTrue(sentTo(dev).getLast().getPreview().contains("was not approved"));
     }

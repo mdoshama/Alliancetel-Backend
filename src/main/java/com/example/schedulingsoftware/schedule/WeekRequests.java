@@ -44,6 +44,7 @@ public class WeekRequests {
     private final AccessPolicy accessPolicy;
     private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
     private final FullWeekRepository fullWeeks;
+    private final WeeklyScheduleRepository scheduleRepository;
 
     /** Where someone stands for the week. */
     public enum State {
@@ -58,7 +59,9 @@ public class WeekRequests {
         /** Hasn't asked for anything; has the days the system reserved. */
         RESERVED,
         /** Works all 7 days this week (a manager or admin decided): no day off needed. */
-        FULL_WEEK
+        FULL_WEEK,
+        /** Hasn't asked for anything else; gets their regular day(s) off. */
+        REGULAR
     }
 
     /**
@@ -79,13 +82,14 @@ public class WeekRequests {
      */
     public record Status(LocalDate weekStart, int total, int sent, List<PersonStatus> missing,
             List<PersonStatus> denied, List<PersonStatus> fewer, List<PersonStatus> reserved,
-            List<PersonStatus> others, boolean requestsOpen, Capacity capacity, List<PersonStatus> fullWeek) {
+            List<PersonStatus> others, boolean requestsOpen, Capacity capacity, List<PersonStatus> fullWeek,
+            List<PersonStatus> regular) {
     }
 
     /**
      * The week at a glance: shifts the stores need (sum of each open store's minimum staffing, every day) against
-     * the shifts the team can work (each person's work days a week), and each day as it stands with the days off
-     * asked for so far (pending, reserved and approved).
+     * the shifts the team can work (each person's work days a week), and each day as it stands: from the schedule
+     * once the week is made, otherwise with the days off asked for so far (pending, reserved and approved).
      */
     public record Capacity(int shiftsNeeded, int shiftsAvailable, int daysOffToGive, List<DayCapacity> days) {
 
@@ -122,8 +126,9 @@ public class WeekRequests {
                 .filter(p -> p.state() == State.PENDING || p.state() == State.APPROVED)
                 .filter(p -> p.stillNeeded() == 0).toList();
         List<PersonStatus> full = people.stream().filter(p -> p.state() == State.FULL_WEEK).toList();
+        List<PersonStatus> regular = people.stream().filter(p -> p.state() == State.REGULAR).toList();
         return new Status(week, people.size(), people.size() - missing.size() - reserved.size(), missing, denied,
-                fewer, reserved, others, portal.isOpenFor(week), capacity(areaId, week), full);
+                fewer, reserved, others, portal.isOpenFor(week), capacity(areaId, week), full, regular);
     }
 
     /** See {@link Capacity}. */
@@ -131,8 +136,23 @@ public class WeekRequests {
     public Capacity capacity(Long areaId, LocalDate anyDayInWeek) {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
         Coverage coverage = coverage(areaId);
-        Map<LocalDate, Set<Long>> off = offByDate(requests(areaId, week));
+        // Once the week is made, the schedule is the truth (days given, edits, swaps); before that, the requests.
+        Map<LocalDate, Set<Long>> off = scheduleRepository.findByAreaIdAndWeekStart(areaId, week)
+                .map(WeekRequests::offInSchedule)
+                .orElseGet(() -> offByDate(requests(areaId, week)));
         Set<Long> full = fullWeekIds(areaId, week);
+        if (scheduleRepository.findByAreaIdAndWeekStart(areaId, week).isEmpty()) {
+            // Regular days off not in the requests yet still count: they're given when the week is generated.
+            Map<Long, List<DayOffRequest>> byPerson = requests(areaId, week).stream()
+                    .collect(Collectors.groupingBy(r -> r.getEmployee().getId()));
+            for (Employee e : coverage.staff()) {
+                if (!full.contains(e.getId())) {
+                    for (LocalDate d : plannedRegular(e, week, byPerson.getOrDefault(e.getId(), List.of()))) {
+                        off.computeIfAbsent(d, k -> new HashSet<>()).add(e.getId());
+                    }
+                }
+            }
+        }
         int needed = 0;
         int available = 0;
         int toGive = 0;
@@ -164,6 +184,17 @@ public class WeekRequests {
                 .map(f -> f.getEmployee().getId()).collect(Collectors.toSet());
     }
 
+    /** Who isn't working each day on a schedule that was already made. */
+    private static Map<LocalDate, Set<Long>> offInSchedule(WeeklySchedule schedule) {
+        Map<LocalDate, Set<Long>> off = new HashMap<>();
+        for (ScheduleEntry e : schedule.getEntries()) {
+            if (e.getType() != DayType.WORK) {
+                off.computeIfAbsent(e.getWorkDate(), k -> new HashSet<>()).add(e.getEmployee().getId());
+            }
+        }
+        return off;
+    }
+
     private static Map<LocalDate, Set<Long>> offByDate(List<DayOffRequest> requests) {
         Map<LocalDate, Set<Long>> off = new HashMap<>();
         for (DayOffRequest r : requests) {
@@ -193,13 +224,6 @@ public class WeekRequests {
         return suggestFor(areaId, anyDayInWeek);
     }
 
-    /** People who only have reserved days (haven't asked for anything themselves). */
-    @Transactional(readOnly = true)
-    public List<String> reservedOnlyNames(Long areaId, LocalDate weekStart) {
-        return people(areaId, weekStart).stream().filter(p -> p.state() == State.RESERVED)
-                .map(PersonStatus::name).toList();
-    }
-
     public Employee employee(Long id) {
         return employeeRepository.findById(id).orElseThrow();
     }
@@ -226,7 +250,23 @@ public class WeekRequests {
             }
         }
 
-        Map<Long, PersonStatus> statuses = people(staff, requests, fullWeekIds(areaId, week)).stream()
+        // Regular days not in the requests yet: they'll be given, so plan around them.
+        Set<Long> fullIds = fullWeekIds(areaId, week);
+        Map<Long, List<DayOffRequest>> byPerson = requests.stream()
+                .collect(Collectors.groupingBy(r -> r.getEmployee().getId()));
+        for (Employee e : staff) {
+            if (fullIds.contains(e.getId())) {
+                continue;
+            }
+            for (LocalDate d : plannedRegular(e, week, byPerson.getOrDefault(e.getId(), List.of()))) {
+                asked.computeIfAbsent(e.getId(), k -> new HashSet<>()).add(d);
+                off.computeIfAbsent(d, k -> new HashSet<>()).add(e.getId());
+                if (e.getHomeStore() != null) {
+                    storeOff.computeIfAbsent(e.getHomeStore().getId(), k -> new HashSet<>()).add(d);
+                }
+            }
+        }
+        Map<Long, PersonStatus> statuses = people(staff, requests, fullIds, week).stream()
                 .collect(Collectors.toMap(PersonStatus::employeeId, p -> p));
         // Most constrained first: the people with the fewest days the stores can spare them (a primary tied to one
         // store, a floater with only a couple of stores), so everyone still gets a day that works.
@@ -309,10 +349,11 @@ public class WeekRequests {
     }
 
     private List<PersonStatus> people(Long areaId, LocalDate week) {
-        return people(staff(areaId), requests(areaId, week), fullWeekIds(areaId, week));
+        return people(staff(areaId), requests(areaId, week), fullWeekIds(areaId, week), week);
     }
 
-    private static List<PersonStatus> people(List<Employee> staff, List<DayOffRequest> requests, Set<Long> fullWeek) {
+    private static List<PersonStatus> people(List<Employee> staff, List<DayOffRequest> requests, Set<Long> fullWeek,
+            LocalDate week) {
         Map<Long, List<DayOffRequest>> byPerson = requests.stream()
                 .collect(Collectors.groupingBy(r -> r.getEmployee().getId()));
         return staff.stream().filter(WeekRequests::needsDayOff).map(e -> {
@@ -329,8 +370,15 @@ public class WeekRequests {
                         all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
                                 .map(DayOffRequest::getOffDate).sorted().toList(), 0, asked);
             }
-            if (mine.isEmpty()) {
+            // Regular days that aren't in the requests yet (the week hasn't been opened): they're given at generate.
+            List<LocalDate> planned = plannedRegular(e, week, all);
+            if (mine.isEmpty() && !planned.isEmpty()) {
+                state = State.REGULAR;
+            } else if (mine.isEmpty()) {
                 state = hasReserved ? State.RESERVED : State.MISSING;
+            } else if (mine.stream().allMatch(DayOffRequest::isRegular)
+                    && mine.stream().anyMatch(r -> r.getStatus() != DayOffStatus.REJECTED)) {
+                state = State.REGULAR;
             } else if (mine.stream().anyMatch(r -> r.getStatus() == DayOffStatus.APPROVED)) {
                 state = State.APPROVED;
             } else if (mine.stream().anyMatch(r -> r.getStatus() == DayOffStatus.PENDING)) {
@@ -338,13 +386,31 @@ public class WeekRequests {
             } else {
                 state = State.DENIED;
             }
-            int asked = (int) all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).count();
+            List<LocalDate> dates = new ArrayList<>(all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
+                    .map(DayOffRequest::getOffDate).toList());
+            dates.addAll(planned);
+            dates.sort(null);
+            // An emergency still waiting isn't a day off yet: until a manager gives it, they keep a day of their own
+            // (given back if the emergency is approved).
+            int waitingEmergencies = (int) all.stream()
+                    .filter(r -> r.isEmergency() && r.getStatus() == DayOffStatus.PENDING).count();
             return new PersonStatus(e.getId(), e.getFullName(),
-                    e.getHomeStore() == null ? null : e.getHomeStore().getName(), state,
-                    all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
-                            .map(DayOffRequest::getOffDate).sorted().toList(),
-                    Math.max(0, 7 - e.getWorkDaysPerWeek()), asked);
+                    e.getHomeStore() == null ? null : e.getHomeStore().getName(), state, dates,
+                    Math.max(0, 7 - e.getWorkDaysPerWeek()), dates.size() - waitingEmergencies);
         }).toList();
+    }
+
+    /**
+     * Someone's regular days off in the week that have no request yet (any request on that day, even one turned
+     * down, means it was already dealt with).
+     */
+    static List<LocalDate> plannedRegular(Employee e, LocalDate week, List<DayOffRequest> theirs) {
+        if (e.getRegularDaysOff() == null || e.getRegularDaysOff().isEmpty()) {
+            return List.of();
+        }
+        Set<LocalDate> taken = theirs.stream().map(DayOffRequest::getOffDate).collect(Collectors.toSet());
+        return week.datesUntil(week.plusDays(7))
+                .filter(d -> e.getRegularDaysOff().contains(d.getDayOfWeek()) && !taken.contains(d)).toList();
     }
 
     /** Someone who works every day of the week has no day off to ask for. */

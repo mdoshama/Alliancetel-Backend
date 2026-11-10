@@ -154,19 +154,9 @@ public class ScheduleService {
                         + (missing.size() > 8 ? " and " + (missing.size() - 8) + " more" : "")
                         + ". Use \"Suggest days off\" to give them a day.");
             }
-            // While the week still takes requests, wait for people who haven't chosen (they have reserved days).
-            if (portal.isOpenFor(weekStart)) {
-                List<String> waiting = weekRequests.reservedOnlyNames(areaId, weekStart);
-                if (!waiting.isEmpty()) {
-                    throw new BusinessRuleException("Requests for this week are still open, and " + waiting.size()
-                            + (waiting.size() == 1 ? " person hasn't" : " people haven't") + " picked their days yet ("
-                            + String.join(", ", waiting.stream().limit(8).toList())
-                            + (waiting.size() > 8 ? " and " + (waiting.size() - 8) + " more" : "")
-                            + "; they have reserved days). Wait until requests close on Friday, or close requests "
-                            + "on the Day-off Requests page to generate now.");
-                }
-            }
         }
+
+        giveReservedDays(areaId, weekStart);
 
         WeeklySchedule schedule = scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
                 .orElseGet(() -> {
@@ -375,54 +365,6 @@ public class ScheduleService {
                     + dayName(date) + ". Open the day to pick a store for " + person.getFirstName() + ".");
         }
         return null;
-    }
-
-    /**
-     * Moves one person's day off to another day of the same week: a work day and a day off trade places (e.g. off
-     * Tuesday becomes off Thursday). The new work day keeps the store of the old one when that store is open, otherwise
-     * the home store. Approved days off can't be moved.
-     */
-    @Transactional
-    public ScheduleResponse swapDays(Long scheduleId, Long entryIdA, Long entryIdB) {
-        WeeklySchedule schedule = getManaged(scheduleId);
-        requireDraft(schedule);
-        ScheduleEntry a = entry(schedule, entryIdA);
-        ScheduleEntry b = entry(schedule, entryIdB);
-        if (!a.getEmployee().getId().equals(b.getEmployee().getId()) || a.getWorkDate().equals(b.getWorkDate())) {
-            throw new BusinessRuleException("Pick two different days of the same person.");
-        }
-        if (a.getType() == DayType.REQUESTED_OFF || b.getType() == DayType.REQUESTED_OFF) {
-            throw new BusinessRuleException("An approved day off can't be moved. Reject or change the request instead.");
-        }
-        if ((a.getType() == DayType.WORK) == (b.getType() == DayType.WORK)) {
-            throw new BusinessRuleException("Drag a day off onto a work day (or the other way round) to move it.");
-        }
-        ScheduleEntry work = a.getType() == DayType.WORK ? a : b;
-        ScheduleEntry off = work == a ? b : a;
-        Employee person = work.getEmployee();
-        if (hasApprovedDayOff(person, off.getWorkDate())) {
-            throw new BusinessRuleException(person.getFirstName() + " has an approved day off on "
-                    + dayName(off.getWorkDate()) + ", so it can't be made a work day.");
-        }
-        Store store = work.getStore() != null && work.getStore().isOpenOn(off.getWorkDate()) ? work.getStore() : null;
-        if (store == null) {
-            Store home = homeStoreOf(person);
-            store = home != null && home.isOpenOn(off.getWorkDate()) ? home : null;
-        }
-        if (store == null && anyStoreOpen(schedule, off.getWorkDate())) {
-            throw new BusinessRuleException((work.getStore() == null ? "Their store" : work.getStore().getName())
-                    + " is closed on " + dayName(off.getWorkDate()) + ". Open the day to pick a store.");
-        }
-        off.setType(DayType.WORK);
-        off.setStore(store);
-        off.setAutoAssigned(false);
-        off.setManuallyEdited(true);
-        work.setType(DayType.OFF);
-        work.setStore(null);
-        work.setAutoAssigned(false);
-        work.setManuallyEdited(true);
-        schedule.setUpdatedAt(Instant.now());
-        return toResponse(schedule);
     }
 
     /**
@@ -643,6 +585,58 @@ public class ScheduleService {
      * generator, so only requested days count when there is no schedule yet. No access check: callers check it.
      */
     @Transactional(readOnly = true)
+    /**
+     * Where an approved day off came from, for the label on the schedule. Employees never see the word "reserved":
+     * a day the system gave them shows as ASSIGNED.
+     */
+    static String offSource(DayOffRequest r, boolean employeeView) {
+        if (r.isEmergency()) {
+            return "EMERGENCY";
+        }
+        if (r.isRegular()) {
+            return "REGULAR";
+        }
+        if (r.isReserved()) {
+            return employeeView ? "ASSIGNED" : "RESERVED";
+        }
+        boolean byManager = "Day off given by your manager".equals(r.getReason())
+                || (r.getReviewNote() != null && r.getReviewNote().startsWith("Given by "));
+        return byManager ? "MANAGER" : "REQUESTED";
+    }
+
+    /**
+     * The week is being made: days the system was holding (regular days off, and the days it picked for people who
+     * didn't ask) become their days off. Nobody is told now; they see it when the schedule is published. Emergency
+     * requests are left for a manager or admin.
+     */
+    private void giveReservedDays(Long areaId, LocalDate weekStart) {
+        java.time.Instant now = java.time.Instant.now();
+        for (int i = 0; i < 7; i++) {
+            for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, weekStart.plusDays(i),
+                    List.of(DayOffStatus.PENDING))) {
+                if (r.isReserved()) {
+                    r.setStatus(DayOffStatus.APPROVED);
+                    r.setReviewNote(r.isRegular() ? "Regular day off, given by the system."
+                            : "Given by the system (no day was asked for).");
+                    r.setReviewedAt(now);
+                }
+            }
+        }
+        dayOffRepository.flush();
+    }
+
+    /**
+     * How many people the area's stores would be short on that date if exactly these people were off (primaries
+     * stay at their store, floaters only cover their own stores). 0 means every store is covered.
+     */
+    public int shortWith(Long areaId, LocalDate date, Set<Long> offIds) {
+        List<Employee> staff = employeeRepository
+                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES).stream()
+                .filter(Employee::worksShifts).toList();
+        Coverage coverage = Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff);
+        return coverage.day(date, offIds).shortBy();
+    }
+
     public DayRoom dayRoom(Employee employee, LocalDate date, Collection<DayOffStatus> openStatuses) {
         return dayRoom(employee, date, openStatuses, false);
     }
@@ -1159,6 +1153,17 @@ public class ScheduleService {
                         .toList();
         Map<String, WeekRequest> requestByDay = new HashMap<>();
         requests.forEach(r -> requestByDay.putIfAbsent(r.employeeId() + "|" + r.date(), r));
+        // Approved days off, so managers can revoke one from the schedule (the only place to do it).
+        Map<String, Long> approvedByDay = new HashMap<>();
+        Map<String, String> sourceByDay = new HashMap<>();
+        for (DayOffRequest r : dayOffRepository.findForArea(schedule.getArea().getId(), DayOffStatus.APPROVED,
+                schedule.getWeekStart(), schedule.getWeekEnd())) {
+            String key = r.getEmployee().getId() + "|" + r.getOffDate();
+            if (!me.isEmployee()) {
+                approvedByDay.put(key, r.getId());
+            }
+            sourceByDay.put(key, offSource(r, me.isEmployee()));
+        }
 
         List<EmployeeRow> rows = byEmployee.values().stream()
                 .map(entries -> {
@@ -1175,7 +1180,14 @@ public class ScheduleService {
                                     x.getStore() == null ? null : x.getStore().hoursOn(x.getWorkDate().getDayOfWeek()).getOpensAt(),
                                     x.getStore() == null ? null : x.getStore().hoursOn(x.getWorkDate().getDayOfWeek()).getClosesAt(),
                                     x.getStore() != null && !x.getStore().isOpenOn(x.getWorkDate()),
-                                    requestByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate())))
+                                    requestByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate()),
+                                    x.getType() == DayType.REQUESTED_OFF
+                                            ? approvedByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate())
+                                            : null,
+                                    x.getType() == DayType.REQUESTED_OFF
+                                            ? sourceByDay.getOrDefault(x.getEmployee().getId() + "|" + x.getWorkDate(),
+                                                    "REQUESTED")
+                                            : null))
                             .toList();
                     int working = (int) cells.stream().filter(c -> c.type() == DayType.WORK).count();
                     Store home = e.getHomeStore();

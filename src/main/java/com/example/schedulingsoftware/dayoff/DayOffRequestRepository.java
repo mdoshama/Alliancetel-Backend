@@ -27,9 +27,6 @@ public interface DayOffRequestRepository
     List<DayOffRequest> findForAreaOnDate(@Param("areaId") Long areaId, @Param("date") LocalDate date,
             @Param("statuses") Collection<DayOffStatus> statuses);
 
-    long countByEmployeeIdAndOffDateBetweenAndStatusIn(Long employeeId, LocalDate from, LocalDate to,
-            Collection<DayOffStatus> statuses);
-
     /** Like the count above, but leaving out emergency requests (they don't use up the weekly limit). */
     /** Reserved days in a range, latest first (the one given back first when they ask for another day). */
     List<DayOffRequest> findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(Long employeeId,

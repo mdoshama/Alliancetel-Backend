@@ -94,7 +94,7 @@ public class EmployeeController {
     @PutMapping("/{id}/regular-days-off")
     public EmployeeResponse setRegularDaysOff(@PathVariable Long id,
             @Valid @RequestBody EmployeeDtos.RegularDaysOffRequest request) {
-        employeeService.setRegularDaysOff(id, request.days());
+        employeeService.setRegularDaysOff(id, request.days(), reservations::checkRegularDays);
         reservations.replanFor(employeeService.getEmployee(id));
         return employeeService.findById(id);
     }

@@ -42,6 +42,10 @@ import jakarta.persistence.criteria.Predicate;
 @Service
 public class DayOffService {
 
+    /** Note on days off the system gave by itself (the stores stay covered). */
+    static final String AUTO_NOTE = "Given automatically: the stores stay covered.";
+
+
     private static final EnumSet<DayOffStatus> OPEN_STATUSES = EnumSet.of(DayOffStatus.PENDING, DayOffStatus.APPROVED);
 
     private final DayOffRequestRepository repository;
@@ -129,6 +133,11 @@ public class DayOffService {
             if (employeeId != null) {
                 predicates.add(cb.equal(root.get("employee").get("id"), employeeId));
             }
+            if (user.isEmployee()) {
+                // Days the system picked are planning: employees see them on the published schedule only. Their
+                // regular day off is theirs, so they see it.
+                predicates.add(cb.or(cb.isFalse(root.get("reserved")), cb.isTrue(root.get("regular"))));
+            }
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -193,18 +202,22 @@ public class DayOffService {
         if (selfService && emergency && oneEmergencyPerMonth) {
             checkEmergencyLimit(employee, dates);
         }
-        // Asking for a day that is already reserved for them just keeps it (now as their own choice).
+        // Asking for a day that is already reserved for them just keeps it, now as their own choice: it's theirs
+        // (the stores were planned around it), so it's given right away.
         List<DayOffResponse> confirmed = new ArrayList<>();
         for (java.util.Iterator<LocalDate> it = dates.iterator(); it.hasNext();) {
             LocalDate date = it.next();
             DayOffRequest existing = repository.findByEmployeeIdAndOffDate(employee.getId(), date).orElse(null);
             if (existing != null && existing.isReserved() && existing.getStatus() != DayOffStatus.REJECTED
                     && !override) {
-                // Now their own request; still waiting for a manager unless one already approved it.
-                existing.setReserved(false);
-                existing.setRegular(false);
-                existing.setReason(InputRules.clean(request.reason()));
-                confirmed.add(DayOffResponse.from(existing));
+                // A regular day stays their regular day (it comes first); a day the system picked becomes theirs.
+                if (!existing.isRegular()) {
+                    existing.setReserved(false);
+                    existing.setReason(InputRules.clean(request.reason()));
+                }
+                confirmed.add(existing.getStatus() == DayOffStatus.PENDING
+                        ? grantAutomatically(existing, AUTO_NOTE)
+                        : DayOffResponse.from(existing));
                 it.remove();
             }
         }
@@ -244,29 +257,12 @@ public class DayOffService {
                             + "emergency request.");
                 }
             });
-            // One person off per store per day, so the store's primary and secondary are never both away. A day the
-            // system only reserved for a colleague (not approved yet) doesn't block the request: if a manager approves
-            // it, the colleague's reservation moves to another day.
-            if (employee.getHomeStore() != null) {
-                DayOffRequest real = repository.findSameStore(employee.getHomeStore().getId(), employee.getId(),
-                        dates.first(), dates.last(), OPEN_STATUSES).stream()
-                        .filter(r -> dates.contains(r.getOffDate())
-                                && !r.isMovable())
-                        .findFirst().orElse(null);
-                if (real != null) {
-                    throw new BusinessRuleException(real.getEmployee().getFirstName() + " already has "
-                            + dayName(real.getOffDate()) + " off at " + employee.getHomeStore().getName()
-                            + ". Only one person per store can be off on a day. "
-                            + "For something urgent, send an emergency request.");
-                }
-            }
-            // The whole area: never accept more days off than the stores can spare that day (other people's reserved
-            // days can move, so they don't count against it).
-            for (LocalDate date : dates) {
-                DayRoom room = scheduleService.dayRoom(employee, date, OPEN_STATUSES, true);
-                if (room.full()) {
-                    throw new BusinessRuleException(fullDayMessage(room));
-                }
+            // Regular days off come first: a request only fills the days off left after them (reserved days, picked
+            // by the system, come last and give way).
+            checkRoomAfterRegularDays(employee, dates);
+            String why = whyNotCovered(employee, dates);
+            if (why != null) {
+                throw new BusinessRuleException(why);
             }
         }
 
@@ -286,9 +282,100 @@ public class DayOffService {
             saved.forEach(r -> created.add(approve(r.getId(), note)));
             return created;
         }
-        // Requests wait for a manager or admin. Their reserved day stays until one is approved (then it's given back).
-        saved.forEach(r -> created.add(DayOffResponse.from(r)));
+        if (emergency) {
+            // Emergencies are the only requests a manager or admin decides on (they can break the coverage rules).
+            saved.forEach(r -> created.add(DayOffResponse.from(r)));
+            return created;
+        }
+        // Everything else passed the checks above (store covered, one person per store, primaries and floaters
+        // accounted for), so the system gives it straight away; their reserved day that week goes back to work.
+        saved.forEach(r -> created.add(grantAutomatically(r, AUTO_NOTE)));
         return created;
+    }
+
+    /**
+     * Why these days can't be given without a manager, or null if they can: only one person per store off a day (so
+     * a store's primary and secondary are never both away; a colleague's day the system only reserved doesn't count,
+     * it can move), and never more days off in the area than the stores can spare.
+     */
+    private String whyNotCovered(Employee employee, java.util.SortedSet<LocalDate> dates) {
+        if (employee.getHomeStore() != null) {
+            DayOffRequest real = repository.findSameStore(employee.getHomeStore().getId(), employee.getId(),
+                    dates.first(), dates.last(), OPEN_STATUSES).stream()
+                    .filter(r -> dates.contains(r.getOffDate()) && !r.isMovable())
+                    .findFirst().orElse(null);
+            if (real != null) {
+                return real.getEmployee().getFirstName() + " already has " + dayName(real.getOffDate()) + " off at "
+                        + employee.getHomeStore().getName() + ". Only one person per store can be off on a day. "
+                        + "For something urgent, send an emergency request.";
+            }
+        }
+        for (LocalDate date : dates) {
+            DayRoom room = scheduleService.dayRoom(employee, date, OPEN_STATUSES, true);
+            if (room.full()) {
+                return fullDayMessage(room);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Before a week is generated: requests still waiting that aren't emergencies (sent before the system gave days
+     * by itself) are settled the way a new request would be: given when the stores stay covered, otherwise turned
+     * down so the person gets another day. Only emergencies are left for a manager.
+     *
+     * @return how many were settled
+     */
+    @Transactional
+    public int settleWaitingRequests(Long areaId, LocalDate anyDayInWeek) {
+        LocalDate week = weekStart(anyDayInWeek);
+        List<DayOffRequest> waiting = repository.findForArea(areaId, DayOffStatus.PENDING, week, week.plusDays(6))
+                .stream().filter(r -> !r.isEmergency() && !r.isReserved())
+                .sorted(java.util.Comparator.comparing(DayOffRequest::getOffDate)).toList();
+        for (DayOffRequest r : waiting) {
+            // Checked as if it weren't there yet, so it doesn't count against itself.
+            r.setStatus(DayOffStatus.REJECTED);
+            repository.flush();
+            String why = whyNotCovered(r.getEmployee(), new TreeSet<>(List.of(r.getOffDate())));
+            if (why == null) {
+                grantAutomatically(r, AUTO_NOTE);
+            } else {
+                r.setReviewNote("Not given: " + why);
+                r.setReviewedAt(Instant.now());
+                notifier.dayOffDecided(r, false, r.getReviewNote());
+            }
+            repository.flush();
+        }
+        return waiting.size();
+    }
+
+    /**
+     * Someone with regular days off can only ask for the days off they have left that week (their usual number
+     * minus their regular days, counting what they already have). Emergencies and a manager's override skip this.
+     */
+    private void checkRoomAfterRegularDays(Employee employee, java.util.SortedSet<LocalDate> dates) {
+        if (employee.getRegularDaysOff().isEmpty()) {
+            return;
+        }
+        int usual = Math.max(0, 7 - employee.getWorkDaysPerWeek());
+        Map<LocalDate, List<LocalDate>> byWeek = new LinkedHashMap<>();
+        dates.forEach(d -> byWeek.computeIfAbsent(weekStart(d), k -> new ArrayList<>()).add(d));
+        for (var entry : byWeek.entrySet()) {
+            LocalDate monday = entry.getKey();
+            List<LocalDate> regularDates = employee.getRegularDaysOff().stream().sorted()
+                    .map(dow -> monday.plusDays(dow.getValue() - 1L)).limit(usual).toList();
+            long asked = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(employee.getId(),
+                    monday, monday.plusDays(6), OPEN_STATUSES);
+            int left = (int) Math.max(0, usual - regularDates.size() - asked);
+            if (entry.getValue().size() > left) {
+                String regular = String.join(" and ", regularDates.stream().map(DayOffService::dayName).toList());
+                throw new BusinessRuleException(left == 0
+                        ? "Your regular day off is " + regular + ", so that's your day off this week. "
+                                + "For something urgent, send an emergency request."
+                        : "Besides your regular day off (" + regular + "), you can pick " + left + " more day"
+                                + (left == 1 ? "" : "s") + " this week.");
+            }
+        }
     }
 
     /** Days the system reserved for other people in the area on this date. */
@@ -484,7 +571,26 @@ public class DayOffService {
     @Transactional
     public DayOffResponse approve(Long id, String note) {
         DayOffResponse approved = review(id, DayOffStatus.APPROVED, note);
-        DayOffRequest r = get(id);
+        return approved.withScheduleUpdate(grant(get(id), true));
+    }
+
+    /** Marks the request approved by the system (no manager involved) and applies it like any approval. */
+    private DayOffResponse grantAutomatically(DayOffRequest r, String note) {
+        r.setStatus(DayOffStatus.APPROVED);
+        r.setReviewNote(note);
+        r.setReviewedAt(Instant.now());
+        String update = grant(r, false);
+        return DayOffResponse.from(r).withScheduleUpdate(update);
+    }
+
+    /**
+     * Applies an approved day off: colleagues' movable reserved days give way, the schedule (if made) takes them off
+     * that day, and their own reserved days that week go back to work.
+     *
+     * @param notify tell the person (a manager's decision); automatic approvals show in the app straight away
+     * @return what changed on an existing schedule, or null
+     */
+    private String grant(DayOffRequest r, boolean notify) {
         Employee e = r.getEmployee();
         LocalDate date = r.getOffDate();
         // Reserved days of others give way to an approved request: a colleague at the same store, and others in the
@@ -513,10 +619,12 @@ public class DayOffService {
                     + " is now a work day.";
             message = message == null ? back : message + " " + back;
         }
-        notifier.dayOffDecided(r, true, message);
+        if (notify) {
+            notifier.dayOffDecided(r, true, message);
+        }
         repository.flush();
         aside.forEach(o -> reservations.refill(o.getEmployee(), o.getOffDate()));
-        return approved.withScheduleUpdate(update);
+        return update;
     }
 
     /**
