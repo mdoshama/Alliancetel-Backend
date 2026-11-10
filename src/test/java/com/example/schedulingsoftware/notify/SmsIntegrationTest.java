@@ -149,6 +149,23 @@ class SmsIntegrationTest {
     }
 
     @Test
+    void aManagerCanMessageOnePersonByEveryWayThatReachesThem() {
+        var toAna = notificationService.messagePerson(ana, "Please pick your day off for next week");
+        assertEquals(List.of("Text"), toAna.sentBy(), "email isn't set up in this test");
+        assertTrue(toAna.notSentBy().contains("Email: not set up yet"), toAna.toString());
+        assertTrue(sms(ana).getBody().contains("Please pick your day off"));
+        // Ben never agreed to texts and email isn't set up: nothing reaches him, so the manager is told to call.
+        var none = assertThrows(com.example.schedulingsoftware.common.BusinessRuleException.class,
+                () -> notificationService.messagePerson(ben, "Please pick your day off for next week"));
+        assertTrue(none.getMessage().contains("Try calling"), none.getMessage());
+        // Someone from another area is out of a manager's reach.
+        Long other = areaService.create(new AreaRequest("Other Text Area", null, true)).id();
+        TestUsers.signInAs(cam, Role.MANAGER, other);
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> notificationService.messagePerson(ana, "hi"));
+    }
+
+    @Test
     void announcementsCountPeopleReachableByText() {
         TestUsers.signInAs(ben, Role.EMPLOYEE, area);
         authService.setEmailUpdates(false);

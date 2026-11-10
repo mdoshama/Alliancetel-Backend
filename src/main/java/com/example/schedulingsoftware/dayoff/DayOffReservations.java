@@ -186,7 +186,8 @@ public class DayOffReservations {
     }
 
     /**
-     * Reserves each person's regular days off in that week, up to their usual number of days off, even when the
+     * Reserves each person's regular days off in that week, up to their usual number of days off less the days they
+     * asked for themselves (a day they pick replaces their regular day that week), even when the
      * stores would be short or a colleague at the same store is off too: it stays pending and managers decide. A day
      * they already have any request for (including one turned down this week) is left alone.
      */
@@ -199,8 +200,9 @@ public class DayOffReservations {
                 continue;
             }
             int usual = Math.max(0, 7 - e.getWorkDaysPerWeek());
-            long already = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(e.getId(), week,
-                    week.plusDays(6), List.of(DayOffStatus.PENDING, DayOffStatus.APPROVED))
+            // Days they asked for themselves replace their regular day that week; an emergency doesn't (it comes on top).
+            long already = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
+                    e.getId(), week, week.plusDays(6), List.of(DayOffStatus.PENDING, DayOffStatus.APPROVED))
                     + repository.findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week,
                             week.plusDays(6)).stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).count();
             for (java.time.DayOfWeek dow : e.getRegularDaysOff().stream().sorted().toList()) {
@@ -305,36 +307,37 @@ public class DayOffReservations {
     }
 
     /**
-     * Gives back reserved days so the person isn't off more than their usual number that week (counting their own
-     * pending and approved requests). Each one becomes a work day again on a schedule that's already made.
+     * Gives back held days (reserved by the system, and with {@code regularToo} their regular days) so the person
+     * isn't off more than their usual number that week, counting their own approved days. Days the system picked go
+     * first, then regular days; not yet approved before approved. Each becomes a work day again on a schedule that's
+     * already made. Published weeks are left alone.
      *
-     * @return the dates given back
+     * @param regularToo true when they chose a day themselves: a day they asked for replaces their regular day that
+     *                   week. An emergency comes on top of it, so it leaves the regular day alone.
+     * @return the days given back
      */
     @Transactional
-    public List<LocalDate> trim(Employee e, LocalDate anyDayInWeek) {
+    public List<DayOffRequest> trim(Employee e, LocalDate anyDayInWeek, boolean regularToo) {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
-        // Reserved days still in play (not turned down), the ones not yet approved given back first.
-        // A regular day off is never given back: it comes first. Only days the system picked are.
-        List<DayOffRequest> reserved = repository
-                .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
-                .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED && !r.isRegular())
-                // Approved last.
-                .sorted(java.util.Comparator.comparing((DayOffRequest r) -> r.getStatus() == DayOffStatus.APPROVED))
-                .toList();
-        if (reserved.isEmpty() || published(e.getArea() == null ? null : e.getArea().getId(), week)) {
+        if (published(e.getArea() == null ? null : e.getArea().getId(), week)) {
             return List.of();
         }
-        long own = ownDaysOff(e, week) + repository
+        List<DayOffRequest> held = repository
                 .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
-                .stream().filter(r -> r.isRegular() && r.getStatus() != DayOffStatus.REJECTED).count();
+                .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).toList();
+        List<DayOffRequest> canGo = held.stream()
+                .filter(r -> regularToo || !r.isRegular())
+                .sorted(java.util.Comparator.comparing(DayOffRequest::isRegular)
+                        .thenComparing(r -> r.getStatus() == DayOffStatus.APPROVED))
+                .toList();
         int usual = Math.max(0, 7 - e.getWorkDaysPerWeek());
-        long extra = own + reserved.size() - usual;
-        java.util.ArrayList<LocalDate> released = new java.util.ArrayList<>();
-        for (DayOffRequest r : reserved) {
+        long extra = ownDaysOff(e, week) + held.size() - usual;
+        java.util.ArrayList<DayOffRequest> released = new java.util.ArrayList<>();
+        for (DayOffRequest r : canGo) {
             if (extra <= 0) {
                 break;
             }
-            released.add(r.getOffDate());
+            released.add(r);
             repository.delete(r);
             repository.flush();
             scheduleService.revokeApprovedDayOff(e, r.getOffDate());

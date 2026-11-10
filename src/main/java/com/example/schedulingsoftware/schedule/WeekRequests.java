@@ -67,9 +67,10 @@ public class WeekRequests {
     /**
      * @param daysOffNeeded how many days off they normally take a week (7 − work days)
      * @param daysOffAsked  pending or approved days off this week
+     * @param phone         their phone number (managers and admins call people who haven't picked), or null
      */
     public record PersonStatus(Long employeeId, String name, String homeStoreName, State state, List<LocalDate> dates,
-            int daysOffNeeded, int daysOffAsked) {
+            int daysOffNeeded, int daysOffAsked, String phone) {
 
         /** Days off still to be asked for or given. */
         public int stillNeeded() {
@@ -368,7 +369,7 @@ public class WeekRequests {
                 return new PersonStatus(e.getId(), e.getFullName(),
                         e.getHomeStore() == null ? null : e.getHomeStore().getName(), State.FULL_WEEK,
                         all.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
-                                .map(DayOffRequest::getOffDate).sorted().toList(), 0, asked);
+                                .map(DayOffRequest::getOffDate).sorted().toList(), 0, asked, e.getPhone());
             }
             // Regular days that aren't in the requests yet (the week hasn't been opened): they're given at generate.
             List<LocalDate> planned = plannedRegular(e, week, all);
@@ -396,21 +397,28 @@ public class WeekRequests {
                     .filter(r -> r.isEmergency() && r.getStatus() == DayOffStatus.PENDING).count();
             return new PersonStatus(e.getId(), e.getFullName(),
                     e.getHomeStore() == null ? null : e.getHomeStore().getName(), state, dates,
-                    Math.max(0, 7 - e.getWorkDaysPerWeek()), dates.size() - waitingEmergencies);
+                    Math.max(0, 7 - e.getWorkDaysPerWeek()), dates.size() - waitingEmergencies, e.getPhone());
         }).toList();
     }
 
     /**
-     * Someone's regular days off in the week that have no request yet (any request on that day, even one turned
-     * down, means it was already dealt with).
+     * Someone's regular days off in the week that have no request yet and will be given when the week is generated:
+     * up to their usual number of days off, less the days they asked for themselves (those replace the regular day;
+     * an emergency doesn't) and days already held for them. A day with any request, even one turned down, is skipped.
      */
     static List<LocalDate> plannedRegular(Employee e, LocalDate week, List<DayOffRequest> theirs) {
         if (e.getRegularDaysOff() == null || e.getRegularDaysOff().isEmpty()) {
             return List.of();
         }
-        Set<LocalDate> taken = theirs.stream().map(DayOffRequest::getOffDate).collect(Collectors.toSet());
+        long taken = theirs.stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED && !r.isEmergency()).count();
+        long room = Math.max(0, 7 - e.getWorkDaysPerWeek()) - taken;
+        if (room <= 0) {
+            return List.of();
+        }
+        Set<LocalDate> asked = theirs.stream().map(DayOffRequest::getOffDate).collect(Collectors.toSet());
         return week.datesUntil(week.plusDays(7))
-                .filter(d -> e.getRegularDaysOff().contains(d.getDayOfWeek()) && !taken.contains(d)).toList();
+                .filter(d -> e.getRegularDaysOff().contains(d.getDayOfWeek()) && !asked.contains(d))
+                .limit(room).toList();
     }
 
     /** Someone who works every day of the week has no day off to ask for. */

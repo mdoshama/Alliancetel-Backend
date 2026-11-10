@@ -44,6 +44,12 @@ public class NotificationController {
         return service.announce(body.areaId(), body.message());
     }
 
+    /** Managers and admins: a message to one person by email, WhatsApp and text (whatever reaches them). */
+    @PostMapping("/direct")
+    public NotificationDtos.DirectMessageResult direct(@Valid @RequestBody NotificationDtos.DirectMessageRequest body) {
+        return service.messagePerson(body.employeeId(), body.message());
+    }
+
     /** Admins only: remove one message from the history. */
     @org.springframework.web.bind.annotation.DeleteMapping("/{id}")
     public org.springframework.http.ResponseEntity<Void> delete(@PathVariable Long id) {

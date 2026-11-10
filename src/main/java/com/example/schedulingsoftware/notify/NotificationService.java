@@ -20,6 +20,7 @@ import com.example.schedulingsoftware.employee.Employee;
 import com.example.schedulingsoftware.employee.EmployeeRepository;
 import com.example.schedulingsoftware.employee.Role;
 import com.example.schedulingsoftware.notify.NotificationDtos.AnnounceResult;
+import com.example.schedulingsoftware.notify.NotificationDtos.DirectMessageResult;
 import com.example.schedulingsoftware.notify.NotificationDtos.NotificationResponse;
 import com.example.schedulingsoftware.notify.NotificationDtos.TemplateInfo;
 import com.example.schedulingsoftware.notify.NotificationDtos.WhatsAppStatus;
@@ -99,6 +100,61 @@ public class NotificationService {
                         || (smsSettings.isConnected() && e.getPhone() != null && e.isSmsOptIn()))
                 .count();
         return new AnnounceResult(n, reachable);
+    }
+
+    /**
+     * Sends one person a message from a manager or admin, by every way they can get it: email, WhatsApp and text,
+     * each only when it's set up and they agreed to it. Same area only for managers.
+     */
+    @Transactional
+    public DirectMessageResult messagePerson(Long employeeId, String message) {
+        Employee e = employeeRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee", employeeId));
+        Long areaId = e.getArea() == null ? null : e.getArea().getId();
+        accessPolicy.requireManagerOf(areaId);
+        CurrentUser user = accessPolicy.current();
+        if (e.getId().equals(user.id())) {
+            throw new BusinessRuleException("You can't send a message to yourself.");
+        }
+        if (!e.isActive() || e.getArea() == null) {
+            throw new BusinessRuleException(e.getFullName() + " can't be messaged here (inactive or not in an area).");
+        }
+        List<String> sent = new java.util.ArrayList<>();
+        List<String> notSent = new java.util.ArrayList<>();
+        if (e.getEmail() == null) {
+            notSent.add("Email: no email on file");
+        } else if (!e.isEmailOptIn()) {
+            notSent.add("Email: they turned email off");
+        } else if (!emailSettings.isConnected()) {
+            notSent.add("Email: not set up yet");
+        } else {
+            sent.add("Email");
+        }
+        if (!settings.isConnected()) {
+            notSent.add("WhatsApp: not set up yet");
+        } else if (e.getPhone() == null) {
+            notSent.add("WhatsApp: no phone number on file");
+        } else if (!e.isWhatsappOptIn()) {
+            notSent.add("WhatsApp: they haven't agreed to WhatsApp messages");
+        } else {
+            sent.add("WhatsApp");
+        }
+        if (!smsSettings.isConnected()) {
+            notSent.add("Text: not set up yet");
+        } else if (e.getPhone() == null) {
+            notSent.add("Text: no phone number on file");
+        } else if (!e.isSmsOptIn()) {
+            notSent.add("Text: they haven't agreed to text messages");
+        } else {
+            sent.add("Text");
+        }
+        if (sent.isEmpty()) {
+            throw new BusinessRuleException("There's no way to reach " + e.getFirstName() + " by message right now ("
+                    + String.join("; ", notSent) + "). Try calling instead.");
+        }
+        Area area = e.getArea();
+        notifier.announce(area, List.of(e), user.fullName(), InputRules.clean(message));
+        return new DirectMessageResult(sent, notSent);
     }
 
     /** Admins only: removes one message from the history (not one that's still being sent). */

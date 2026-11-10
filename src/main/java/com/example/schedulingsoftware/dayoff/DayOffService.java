@@ -99,28 +99,30 @@ public class DayOffService {
     @Transactional(readOnly = true)
     public PageResponse<DayOffResponse> page(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to, String query, Integer page, Integer size) {
-        return page(requestedAreaId, requestedEmployeeId, status, from, to, query, null, null, page, size);
+        return page(requestedAreaId, requestedEmployeeId, status, from, to, query, null, null, null, page, size);
     }
 
     /**
      * Same, optionally only reserved days ({@code reserved = true}) or only ones people asked for ({@code false}),
-     * and only regular days off ({@code regular = true}) or none of them ({@code false}).
+     * only regular days off ({@code regular = true}) or none of them ({@code false}), and only emergencies
+     * ({@code emergency = true}) or none ({@code false}).
      */
     @Transactional(readOnly = true)
     public PageResponse<DayOffResponse> page(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
-            LocalDate from, LocalDate to, String query, Boolean reserved, Boolean regular, Integer page, Integer size) {
-        var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query, reserved, regular);
+            LocalDate from, LocalDate to, String query, Boolean reserved, Boolean regular, Boolean emergency,
+            Integer page, Integer size) {
+        var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query, reserved, regular, emergency);
         return PageResponse.from(repository.findAll(spec, PageResponse.request(page, size, Sort.by("offDate", "id"))),
                 DayOffResponse::from);
     }
 
     private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to, String query) {
-        return filter(requestedAreaId, requestedEmployeeId, status, from, to, query, null, null);
+        return filter(requestedAreaId, requestedEmployeeId, status, from, to, query, null, null, null);
     }
 
     private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
-            LocalDate from, LocalDate to, String query, Boolean reserved, Boolean regular) {
+            LocalDate from, LocalDate to, String query, Boolean reserved, Boolean regular, Boolean emergency) {
         CurrentUser user = accessPolicy.current();
         Long areaId = accessPolicy.restrictToArea(requestedAreaId);
         // Employees only ever see their own requests.
@@ -146,6 +148,9 @@ public class DayOffService {
             }
             if (regular != null) {
                 predicates.add(cb.equal(root.get("regular"), regular));
+            }
+            if (emergency != null) {
+                predicates.add(cb.equal(root.get("emergency"), emergency));
             }
             if (from != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("offDate"), from));
@@ -257,9 +262,6 @@ public class DayOffService {
                             + "emergency request.");
                 }
             });
-            // Regular days off come first: a request only fills the days off left after them (reserved days, picked
-            // by the system, come last and give way).
-            checkRoomAfterRegularDays(employee, dates);
             String why = whyNotCovered(employee, dates);
             if (why != null) {
                 throw new BusinessRuleException(why);
@@ -349,33 +351,23 @@ public class DayOffService {
         return waiting.size();
     }
 
-    /**
-     * Someone with regular days off can only ask for the days off they have left that week (their usual number
-     * minus their regular days, counting what they already have). Emergencies and a manager's override skip this.
-     */
-    private void checkRoomAfterRegularDays(Employee employee, java.util.SortedSet<LocalDate> dates) {
-        if (employee.getRegularDaysOff().isEmpty()) {
-            return;
+    /** "Your regular day off on Tuesday is a work day this week." for days given back, or null. */
+    private static String releasedNote(List<DayOffRequest> released) {
+        if (released.isEmpty()) {
+            return null;
         }
-        int usual = Math.max(0, 7 - employee.getWorkDaysPerWeek());
-        Map<LocalDate, List<LocalDate>> byWeek = new LinkedHashMap<>();
-        dates.forEach(d -> byWeek.computeIfAbsent(weekStart(d), k -> new ArrayList<>()).add(d));
-        for (var entry : byWeek.entrySet()) {
-            LocalDate monday = entry.getKey();
-            List<LocalDate> regularDates = employee.getRegularDaysOff().stream().sorted()
-                    .map(dow -> monday.plusDays(dow.getValue() - 1L)).limit(usual).toList();
-            long asked = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(employee.getId(),
-                    monday, monday.plusDays(6), OPEN_STATUSES);
-            int left = (int) Math.max(0, usual - regularDates.size() - asked);
-            if (entry.getValue().size() > left) {
-                String regular = String.join(" and ", regularDates.stream().map(DayOffService::dayName).toList());
-                throw new BusinessRuleException(left == 0
-                        ? "Your regular day off is " + regular + ", so that's your day off this week. "
-                                + "For something urgent, send an emergency request."
-                        : "Besides your regular day off (" + regular + "), you can pick " + left + " more day"
-                                + (left == 1 ? "" : "s") + " this week.");
-            }
+        List<String> regular = released.stream().filter(DayOffRequest::isRegular)
+                .map(r -> dayName(r.getOffDate())).toList();
+        List<String> reserved = released.stream().filter(r -> !r.isRegular())
+                .map(r -> dayName(r.getOffDate())).toList();
+        List<String> parts = new ArrayList<>();
+        if (!regular.isEmpty()) {
+            parts.add("Your regular day off on " + String.join(" and ", regular) + " is a work day this week.");
         }
+        if (!reserved.isEmpty()) {
+            parts.add("Your reserved day off on " + String.join(" and ", reserved) + " is now a work day.");
+        }
+        return String.join(" ", parts);
     }
 
     /** Days the system reserved for other people in the area on this date. */
@@ -610,13 +602,11 @@ public class DayOffService {
         }
         // If that week's schedule was already made, the person must not stay scheduled to work that day.
         String update = scheduleService.applyApprovedDayOff(e, date);
-        // Their own reserved day(s) that week go back to work.
-        List<LocalDate> released = reservations.trim(e, date);
+        // Days held for them that week go back to work: the ones the system picked and, when they chose this day
+        // themselves (not an emergency), their regular day too.
         String message = r.getReviewNote();
-        if (!released.isEmpty()) {
-            String back = "Your reserved day off on "
-                    + String.join(" and ", released.stream().map(DayOffService::dayName).toList())
-                    + " is now a work day.";
+        String back = releasedNote(reservations.trim(e, date, !r.isEmergency()));
+        if (back != null) {
             message = message == null ? back : message + " " + back;
         }
         if (notify) {
@@ -727,7 +717,7 @@ public class DayOffService {
                 : scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate());
         notifier.dayOffDecisionChanged(r, newStatus == DayOffStatus.APPROVED, why);
         if (newStatus == DayOffStatus.APPROVED) {
-            reservations.trim(r.getEmployee(), r.getOffDate());
+            reservations.trim(r.getEmployee(), r.getOffDate(), !r.isEmergency());
         } else {
             reservations.refill(r.getEmployee(), r.getOffDate());
         }

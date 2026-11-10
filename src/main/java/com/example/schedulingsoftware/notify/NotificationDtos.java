@@ -55,6 +55,20 @@ public final class NotificationDtos {
             String message) {
     }
 
+    /** A manager's or admin's message to one person (e.g. someone who hasn't picked their day off yet). */
+    public record DirectMessageRequest(
+            @NotNull Long employeeId,
+            @NotBlank @Size(max = 500) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG)
+            String message) {
+    }
+
+    /**
+     * @param sentBy    the ways it goes out: "Email", "WhatsApp", "Text"
+     * @param notSentBy the ways it can't, each with why ("Text: no phone number on file")
+     */
+    public record DirectMessageResult(List<String> sentBy, List<String> notSentBy) {
+    }
+
     /** @param recipients people the message was queued for; reachable = with a phone and agreement */
     public record AnnounceResult(int recipients, int reachable) {
     }

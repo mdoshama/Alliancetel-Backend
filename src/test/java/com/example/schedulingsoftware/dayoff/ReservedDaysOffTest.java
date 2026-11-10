@@ -3,6 +3,7 @@ package com.example.schedulingsoftware.dayoff;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -278,6 +279,13 @@ class ReservedDaysOffTest {
         return daysOff(employee).stream().filter(r -> r.getOffDate().equals(date)).findFirst().orElse(null);
     }
 
+    /** What the week's schedule says for someone on a day. */
+    private com.example.schedulingsoftware.schedule.DayType dayType(Long employee, LocalDate date) {
+        var s = scheduleService.find(area, week).orElseThrow();
+        return s.rows().stream().filter(r -> r.employeeId().equals(employee)).findFirst().orElseThrow()
+                .days().stream().filter(c -> c.date().equals(date)).findFirst().orElseThrow().type();
+    }
+
     @Test
     void aRegularDayOffIsReservedAndGivenWhenTheWeekIsMade() {
         LocalDate tue = futureDay(1);
@@ -291,21 +299,36 @@ class ReservedDaysOffTest {
     }
 
     @Test
-    void aRegularDayComesBeforeARequest() {
+    void aDaySheAsksForReplacesHerRegularDayThatWeek() {
         LocalDate regular = futureDay(1);
         LocalDate other = futureDay(3);
         setRegular(anna, regular.getDayOfWeek());
-        // Anna works 6 days: her regular day is her one day off, so a normal request for another day is refused.
+        scheduleService.generate(area, week, true);
+        assertEquals(com.example.schedulingsoftware.schedule.DayType.REQUESTED_OFF, dayType(anna, regular), "her regular day is off on the draft");
+        // Anna works 6 days. She asks for another day this week: it's given, and her regular day becomes a work day.
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
-        BusinessRuleException e = assertThrows(BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(anna, List.of(other), null, null)));
-        assertTrue(e.getMessage().contains("regular day off"), e.getMessage());
+        var given = dayOffService.create(new CreateDayOffRequest(anna, List.of(other), null, null)).getFirst();
+        assertEquals(DayOffStatus.APPROVED, given.status());
+        TestUsers.signInAsAdmin();
+        assertNull(onDay(anna, regular), "regular day given back for this week");
+        assertEquals(com.example.schedulingsoftware.schedule.DayType.WORK, dayType(anna, regular), "and she works it on the schedule");
+        assertEquals(com.example.schedulingsoftware.schedule.DayType.REQUESTED_OFF, dayType(anna, other));
+        assertEquals(1, daysOff(anna).size(), "still her usual one day off");
+        // Her regular day stays her regular day for other weeks.
+        assertTrue(employeeService.getEmployee(anna).getRegularDaysOff().contains(regular.getDayOfWeek()));
+    }
+
+    @Test
+    void anEmergencyComesOnTopOfTheRegularDayAndAskingForTheRegularDayKeepsIt() {
+        LocalDate regular = futureDay(1);
+        LocalDate other = futureDay(3);
+        setRegular(anna, regular.getDayOfWeek());
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
         // Asking for her regular day just confirms it, still labelled regular.
         dayOffService.create(new CreateDayOffRequest(anna, List.of(regular), null, null));
         assertTrue(onDay(anna, regular).isRegular());
         assertEquals(DayOffStatus.APPROVED, onDay(anna, regular).getStatus());
-        // She sees her regular day; an emergency still goes to a manager, and approving it never drops the regular day.
-        assertEquals(1, dayOffService.search(null, null, null, null, null).size());
+        // An emergency goes to a manager; approving it doesn't take her regular day away.
         Long urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(other), "Sick", true)).getFirst().id();
         TestUsers.signInAsAdmin();
         dayOffService.approve(urgent, null);
@@ -313,7 +336,7 @@ class ReservedDaysOffTest {
     }
 
     @Test
-    void withTwoDaysOffTheRegularOneStaysAndARequestReplacesTheReservedOne() {
+    void withTwoDaysOffARequestReplacesTheSystemsPickFirstThenTheRegularDay() {
         LocalDate regular = futureDay(0);
         setRegular(dee, regular.getDayOfWeek());
         // Dee takes 2 days: her regular day plus one the system picked.
@@ -323,20 +346,23 @@ class ReservedDaysOffTest {
         LocalDate wanted = week.datesUntil(week.plusDays(7))
                 .filter(d -> d.isAfter(portal.today()) && !d.equals(regular) && !d.equals(picked)).findFirst().orElseThrow();
         TestUsers.signInAs(dee, Role.EMPLOYEE, area);
-        // She can ask for one day besides her regular day: it's given, and the system's pick goes back.
+        // One day asked for: the system's pick goes back, her regular day stays.
         assertEquals(DayOffStatus.APPROVED,
                 dayOffService.create(new CreateDayOffRequest(dee, List.of(wanted), null, null)).getFirst().status());
         TestUsers.signInAsAdmin();
         List<DayOffRequest> mine = daysOff(dee);
         assertEquals(2, mine.size());
-        assertTrue(mine.stream().anyMatch(r -> r.isRegular() && r.getOffDate().equals(regular)), "regular first");
-        assertTrue(mine.stream().anyMatch(r -> !r.isReserved() && r.getOffDate().equals(wanted)), "then her request");
-        // A third day is one too many.
-        LocalDate third = week.datesUntil(week.plusDays(7))
+        assertTrue(mine.stream().anyMatch(r -> r.isRegular() && r.getOffDate().equals(regular)), "regular kept");
+        assertTrue(mine.stream().anyMatch(r -> !r.isReserved() && r.getOffDate().equals(wanted)), "her request");
+        // A second day asked for replaces her regular day too.
+        LocalDate second = week.datesUntil(week.plusDays(7))
                 .filter(d -> d.isAfter(portal.today()) && !d.equals(regular) && !d.equals(wanted)).findFirst().orElseThrow();
         TestUsers.signInAs(dee, Role.EMPLOYEE, area);
-        assertThrows(BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(dee, List.of(third), null, null)));
+        dayOffService.create(new CreateDayOffRequest(dee, List.of(second), null, null));
+        TestUsers.signInAsAdmin();
+        mine = daysOff(dee);
+        assertEquals(2, mine.size(), "still her usual two days off");
+        assertTrue(mine.stream().noneMatch(DayOffRequest::isRegular), "regular day is a work day this week");
     }
 
     @Test

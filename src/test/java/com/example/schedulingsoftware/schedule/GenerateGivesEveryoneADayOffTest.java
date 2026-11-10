@@ -69,8 +69,12 @@ class GenerateGivesEveryoneADayOffTest {
     }
 
     private Long employee(String code, String first, Long store, int days) {
+        return employee(code, first, store, days, null);
+    }
+
+    private Long employee(String code, String first, Long store, int days, String phone) {
         return employeeService.create(new EmployeeRequest(code, first, "Gen", code.toLowerCase() + "@test.example",
-                null, Role.EMPLOYEE, area, store, days, true, null)).employee().id();
+                phone, Role.EMPLOYEE, area, store, days, true, null)).employee().id();
     }
 
     @Test
@@ -78,7 +82,7 @@ class GenerateGivesEveryoneADayOffTest {
         Long north = storeService.create(new StoreRequest(area, "North", "GN", null, 1, true, null, null)).id();
         Long south = storeService.create(new StoreRequest(area, "South", "GS", null, 1, true, null, null)).id();
         Long anna = employee("GN-1", "Anna", north, 6);
-        Long ben = employee("GN-2", "Ben", north, 6);
+        Long ben = employee("GN-2", "Ben", north, 6, "(619) 555-0142");
         Long cara = employee("GN-3", "Cara", south, 6);
         Long dee = employee("GN-4", "Dee", south, 5);
         employeeService.setRegularDaysOff(anna, List.of(java.time.DayOfWeek.TUESDAY));
@@ -90,6 +94,9 @@ class GenerateGivesEveryoneADayOffTest {
                 && p.dates().equals(List.of(monday.plusDays(1)))), "Anna listed with her regular day");
         assertTrue(status.missing().stream().noneMatch(p -> p.employeeId().equals(anna)));
         assertEquals(1, status.capacity().days().get(1).off(), "her Tuesday counts in the day tiles");
+        // Ben hasn't picked and has no regular day: managers get his number to call him.
+        var benStatus = status.missing().stream().filter(p -> p.employeeId().equals(ben)).findFirst().orElseThrow();
+        assertEquals("+16195550142", benStatus.phone());
 
         // Ben and Dee never asked. Generating doesn't stop: it gives everyone their days.
         ScheduleResponse s = controller.generate(new GenerateScheduleRequest(area, monday));
@@ -129,16 +136,22 @@ class GenerateGivesEveryoneADayOffTest {
     }
 
     @Test
-    void anEmergencyStillWaitingDoesNotLeaveSomeoneWithoutADayOff() {
+    void anEmergencyStillWaitingIsListedAloneAndDoesNotCountAsADayOff() {
         Long north = storeService.create(new StoreRequest(area, "North", "GN", null, 1, true, null, null)).id();
         employee("GN-1", "Anna", north, 6);
         Long ben = employee("GN-2", "Ben", north, 6);
         dayOffService.create(new CreateDayOffRequest(ben, List.of(monday.plusDays(4)), "Family", true, null));
+        dayOffService.create(new CreateDayOffRequest(ben, List.of(monday.plusDays(1)), null, null));
+        // Managers only list emergencies: the other request was given by the system.
+        var emergencies = dayOffService.page(area, null, null, monday, null, null, null, null, true, 0, 25);
+        assertEquals(1, emergencies.totalElements());
+        assertTrue(emergencies.content().getFirst().emergency());
 
         ScheduleResponse s = controller.generate(new GenerateScheduleRequest(area, monday));
 
         assertEquals(DayType.WORK, row(s, ben).days().get(4).type(), "the emergency waits for a manager");
-        assertEquals(1, offDays(row(s, ben)), "meanwhile Ben has a day the system picked");
+        assertEquals(DayType.REQUESTED_OFF, row(s, ben).days().get(1).type(), "his own pick is his day off");
+        assertEquals(1, offDays(row(s, ben)));
     }
 
     private static long offDays(EmployeeRow row) {

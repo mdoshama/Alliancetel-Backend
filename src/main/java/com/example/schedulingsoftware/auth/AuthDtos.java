@@ -41,7 +41,11 @@ public final class AuthDtos {
             /** Gets schedule updates by text message. */
             boolean smsOptIn,
             /** Date of birth, or null when not on file. */
-            java.time.LocalDate birthDate) {
+            java.time.LocalDate birthDate,
+            /** Days they work in a normal week (7 minus their usual days off). */
+            int workDaysPerWeek,
+            /** Their regular days off, the same every week (a day they ask for replaces it that week). */
+            java.util.List<java.time.DayOfWeek> regularDaysOff) {
 
         public static Me from(Employee e) {
             // Employees aren't told their home store: primary / secondary / floater is for admins and managers.
@@ -56,7 +60,9 @@ public final class AuthDtos {
                     e.isWhatsappOptIn(),
                     e.isEmailOptIn(),
                     e.isSmsOptIn(),
-                    e.getBirthDate());
+                    e.getBirthDate(),
+                    e.getWorkDaysPerWeek(),
+                    e.getRegularDaysOff().stream().sorted().toList());
         }
     }
 
