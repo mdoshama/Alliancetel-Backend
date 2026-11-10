@@ -90,7 +90,7 @@ public final class ScheduleDtos {
             Long approvedRequestId,
             /**
              * On an approved day off, where it came from: REQUESTED (they asked), REGULAR (their regular day off),
-             * RESERVED (the system gave it; employees see ASSIGNED), EMERGENCY (approved emergency) or MANAGER (given
+             * RESERVED (the system gave it), EMERGENCY (approved emergency) or MANAGER (given
              * by a manager); null otherwise.
              */
             String offSource) {

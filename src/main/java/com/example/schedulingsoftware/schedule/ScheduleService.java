@@ -586,10 +586,32 @@ public class ScheduleService {
      */
     @Transactional(readOnly = true)
     /**
-     * Where an approved day off came from, for the label on the schedule. Employees never see the word "reserved":
-     * a day the system gave them shows as ASSIGNED.
+     * The order of the rows: store by store (by name), and at each store its primary first, then its secondary, then
+     * anyone else based there; floaters (no home store) after all the stores. Same order for everyone, whatever they
+     * can see.
      */
-    static String offSource(DayOffRequest r, boolean employeeView) {
+    private static Comparator<EmployeeRow> rowOrder(Map<Long, List<ScheduleEntry>> byEmployee) {
+        Map<Long, Employee> people = new HashMap<>();
+        byEmployee.values().forEach(list -> {
+            Employee e = list.getFirst().getEmployee();
+            people.put(e.getId(), e);
+        });
+        Comparator<Employee> order = Comparator
+                .comparing((Employee e) -> e.getHomeStore() == null ? 1 : 0)
+                .thenComparing(e -> e.getHomeStore() == null ? "" : e.getHomeStore().getName(),
+                        String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(e -> e.getHomeStore() == null ? 0L : e.getHomeStore().getId())
+                .thenComparing(e -> e.getStoreRole() == null ? 2 : switch (e.getStoreRole()) {
+                    case PRIMARY -> 0;
+                    case SECONDARY -> 1;
+                    case FLOATER -> 2;
+                })
+                .thenComparing(Employee::getFullName, String.CASE_INSENSITIVE_ORDER);
+        return (a, b) -> order.compare(people.get(a.employeeId()), people.get(b.employeeId()));
+    }
+
+    /** Where an approved day off came from, for the label managers and admins see on the schedule. */
+    static String offSource(DayOffRequest r) {
         if (r.isEmergency()) {
             return "EMERGENCY";
         }
@@ -597,7 +619,7 @@ public class ScheduleService {
             return "REGULAR";
         }
         if (r.isReserved()) {
-            return employeeView ? "ASSIGNED" : "RESERVED";
+            return "RESERVED";
         }
         boolean byManager = "Day off given by your manager".equals(r.getReason())
                 || (r.getReviewNote() != null && r.getReviewNote().startsWith("Given by "));
@@ -1161,9 +1183,12 @@ public class ScheduleService {
             String key = r.getEmployee().getId() + "|" + r.getOffDate();
             if (!me.isEmployee()) {
                 approvedByDay.put(key, r.getId());
+                sourceByDay.put(key, offSource(r));
             }
-            sourceByDay.put(key, offSource(r, me.isEmployee()));
         }
+        // Employees just see "Day off": where it came from (requested, regular, reserved…) and waiting requests are
+        // for managers and admins.
+        boolean plainDaysOff = me.isEmployee();
 
         List<EmployeeRow> rows = byEmployee.values().stream()
                 .map(entries -> {
@@ -1180,11 +1205,11 @@ public class ScheduleService {
                                     x.getStore() == null ? null : x.getStore().hoursOn(x.getWorkDate().getDayOfWeek()).getOpensAt(),
                                     x.getStore() == null ? null : x.getStore().hoursOn(x.getWorkDate().getDayOfWeek()).getClosesAt(),
                                     x.getStore() != null && !x.getStore().isOpenOn(x.getWorkDate()),
-                                    requestByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate()),
+                                    plainDaysOff ? null : requestByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate()),
                                     x.getType() == DayType.REQUESTED_OFF
                                             ? approvedByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate())
                                             : null,
-                                    x.getType() == DayType.REQUESTED_OFF
+                                    x.getType() == DayType.REQUESTED_OFF && !plainDaysOff
                                             ? sourceByDay.getOrDefault(x.getEmployee().getId() + "|" + x.getWorkDate(),
                                                     "REQUESTED")
                                             : null))
@@ -1197,8 +1222,7 @@ public class ScheduleService {
                             fullWeek.contains(e.getId()) ? 7 : e.getWorkDaysPerWeek(), working, cells,
                             hideStoreRoles ? List.of() : List.copyOf(e.floatStoreIds()));
                 })
-                .sorted(Comparator.comparing((EmployeeRow r) -> r.role() == Role.MANAGER ? 0 : 1)
-                        .thenComparing(EmployeeRow::employeeName))
+                .sorted(rowOrder(byEmployee))
                 .toList();
 
         long pending = dayOffRepository.countForArea(schedule.getArea().getId(), DayOffStatus.PENDING,
