@@ -207,6 +207,12 @@ public class DayOffService {
         if (selfService && emergency && oneEmergencyPerMonth) {
             checkEmergencyLimit(employee, dates);
         }
+        if (selfService) {
+            checkHorizon(dates);
+        }
+        if (selfService && emergency) {
+            checkEmergencyOnlyWhenFull(employee, dates);
+        }
         // Asking for a day that is already reserved for them just keeps it, now as their own choice: it's theirs
         // (the stores were planned around it), so it's given right away.
         List<DayOffResponse> confirmed = new ArrayList<>();
@@ -253,13 +259,15 @@ public class DayOffService {
             requestedPerWeek.merge(weekStart(date), 1, Integer::sum);
         }
         if (!emergency && !override) {
+            int limit = normalDaysOffPerWeek(employee);
             requestedPerWeek.forEach((monday, count) -> {
                 long existing = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
                         employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
-                if (existing + count > maxPerWeek) {
-                    throw new BusinessRuleException("At most " + maxPerWeek + " days off can be requested in one week "
-                            + "(week of " + monday + " already has " + existing + "). For something urgent, send an "
-                            + "emergency request.");
+                if (existing + count > limit) {
+                    throw new BusinessRuleException(employee.getFullName() + " works " + employee.getWorkDaysPerWeek()
+                            + " days a week, so only " + limit + " day" + (limit == 1 ? "" : "s") + " off can be "
+                            + "requested in one week (week of " + shortDate(monday) + " already has " + existing
+                            + "). For more, send an emergency request.");
                 }
             });
             String why = whyNotCovered(employee, dates);
@@ -483,6 +491,68 @@ public class DayOffService {
                         + ". Only one is allowed each month; please talk to your manager.");
             }
         }
+    }
+
+    /**
+     * Days off a normal request can get in one week: their usual days off (1 for a 6-day worker, 2 for a 5-day
+     * worker), never more than the configured weekly maximum. Anything beyond needs an emergency request.
+     */
+    private int normalDaysOffPerWeek(Employee employee) {
+        return Math.max(1, Math.min(maxPerWeek, 7 - employee.getWorkDaysPerWeek()));
+    }
+
+    /** How many weeks past the current one people asking for themselves can request days off. */
+    static final int SELF_SERVICE_WEEKS_AHEAD = 2;
+
+    /** People asking for themselves can only reach the current week and the next two. */
+    private void checkHorizon(java.util.Collection<LocalDate> dates) {
+        LocalDate lastAllowed = weekStart(portal.today()).plusWeeks(SELF_SERVICE_WEEKS_AHEAD).plusDays(6);
+        for (LocalDate date : dates) {
+            if (date.isAfter(lastAllowed)) {
+                throw new BusinessRuleException("You can ask for days off up to " + SELF_SERVICE_WEEKS_AHEAD
+                        + " weeks ahead (until " + shortDate(lastAllowed) + "). " + shortDate(date) + " is too far.");
+            }
+        }
+    }
+
+    /** An emergency request is only for a week with no day left that a normal request could get. */
+    private void checkEmergencyOnlyWhenFull(Employee employee, java.util.Collection<LocalDate> dates) {
+        TreeSet<LocalDate> weeks = new TreeSet<>();
+        dates.forEach(d -> weeks.add(weekStart(d)));
+        for (LocalDate monday : weeks) {
+            LocalDate open = firstOpenDay(employee, monday);
+            if (open != null) {
+                throw new BusinessRuleException("The week of " + shortDate(monday) + " still has open days ("
+                        + dayName(open) + "), so ask for a normal day off. Emergency requests are only for weeks "
+                        + "that are full.");
+            }
+        }
+    }
+
+    /** The first day in the week they could still get with a normal request, or null when the week is full for them. */
+    private LocalDate firstOpenDay(Employee employee, LocalDate monday) {
+        LocalDate today = portal.today();
+        if (requestWindow && !RequestPortal.openWeeks(portal.mode(), today).contains(monday)) {
+            return null;
+        }
+        LocalDate sunday = monday.plusDays(6);
+        LocalDate from = monday.isBefore(today) ? today : monday;
+        if (from.isAfter(sunday)) {
+            return null;
+        }
+        long normal = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
+                employee.getId(), monday, sunday, OPEN_STATUSES);
+        if (normal >= normalDaysOffPerWeek(employee)) {
+            return null;
+        }
+        java.util.Set<LocalDate> taken = new java.util.HashSet<>();
+        takenDays(employee, from, sunday).forEach(t -> taken.add(t.date()));
+        for (LocalDate d = from; !d.isAfter(sunday); d = d.plusDays(1)) {
+            if (!taken.contains(d) && !repository.existsByEmployeeIdAndOffDate(employee.getId(), d)) {
+                return d;
+            }
+        }
+        return null;
     }
 
     /** Whether they already have an emergency request (pending or approved) in the month of this date. */
