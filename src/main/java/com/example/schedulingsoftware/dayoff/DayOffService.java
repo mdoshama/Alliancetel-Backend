@@ -45,6 +45,8 @@ public class DayOffService {
 
     /** Note on days off the system gave by itself (the stores stay covered). */
     static final String AUTO_NOTE = "Given automatically: the stores stay covered.";
+    /** Start of the note on a day moved to the emergency requests by an admin (see moveExtraDaysToEmergency). */
+    static final String MOVED_NOTE = "Moved to emergency requests by ";
 
 
     private static final EnumSet<DayOffStatus> OPEN_STATUSES = EnumSet.of(DayOffStatus.PENDING, DayOffStatus.APPROVED);
@@ -743,6 +745,7 @@ public class DayOffService {
                     // Only planned by the system, nobody asked for it: it goes, and they work that day.
                     repository.delete(r);
                     repository.flush();
+                    scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate());
                     days++;
                     continue;
                 }
@@ -752,7 +755,7 @@ public class DayOffService {
                 r.setRegular(false);
                 r.setStatus(DayOffStatus.PENDING);
                 r.setReviewedAt(null);
-                r.setReviewNote("Moved to emergency requests by " + user.fullName() + ": "
+                r.setReviewNote(MOVED_NOTE + user.fullName() + ": "
                         + r.getEmployee().getFirstName() + " already had " + x.kept().size() + " day"
                         + (x.kept().size() == 1 ? "" : "s") + " off that week.");
                 if (r.getReason() == null || r.getReason().isBlank()
@@ -769,6 +772,33 @@ public class DayOffService {
         }
         org.slf4j.LoggerFactory.getLogger(DayOffService.class).info("{} moved {} extra day(s) off of {} people to emergency requests", user.email(), days, found.size());
         return new DayOffDtos.ExtraDaysMoved(found.size(), days, found.stream().map(Extra::view).toList());
+    }
+
+    /**
+     * Undoes moves made by the first version of {@link #moveExtraDaysToEmergency}, which could take a day someone
+     * asked for (still waiting) as extra next to a day the system had only planned: those turn back into the normal
+     * request they were, still waiting for a manager. Only ones nobody has decided yet. Runs at start-up; once
+     * undone they carry no marker, so it does nothing the next time.
+     *
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    @Transactional
+    public void undoMistakenEmergencyMoves() {
+        int n = 0;
+        for (DayOffRequest r : repository.findByEmergencyTrueAndStatusAndReviewNoteStartingWith(DayOffStatus.PENDING,
+                MOVED_NOTE)) {
+            r.setEmergency(false);
+            r.setReviewNote(null);
+            if ("Extra day off".equals(r.getReason())) {
+                r.setReason(null);
+            }
+            n++;
+        }
+        if (n > 0) {
+            repository.flush();
+            org.slf4j.LoggerFactory.getLogger(DayOffService.class)
+                    .info("Put {} day(s) moved to emergency requests back to normal requests", n);
+        }
     }
 
     private record Extra(DayOffRequest any, LocalDate week, List<DayOffRequest> kept, List<DayOffRequest> extra) {
@@ -797,18 +827,32 @@ public class DayOffService {
         byPersonWeek.forEach((key, list) -> {
             Employee e = list.getFirst().getEmployee();
             int usual = Math.max(0, 7 - e.getWorkDaysPerWeek());
-            if (list.size() <= usual) {
-                return;
-            }
-            List<DayOffRequest> sorted = list.stream().sorted(java.util.Comparator
-                    // Approved first, then the day the schedule gave them (regular, then system), then the oldest.
+            // Real days off: approved ones, and days they asked for themselves. A day the system only planned and
+            // nobody approved yet is a placeholder (it goes once their own day is approved), not a second day off.
+            List<DayOffRequest> real = list.stream()
+                    .filter(r -> r.getStatus() == DayOffStatus.APPROVED || !r.isReserved()).toList();
+            List<DayOffRequest> placeholders = list.stream()
+                    .filter(r -> r.getStatus() != DayOffStatus.APPROVED && r.isReserved()).toList();
+            long approved = real.stream().filter(r -> r.getStatus() == DayOffStatus.APPROVED).count();
+            List<DayOffRequest> sorted = real.stream().sorted(java.util.Comparator
+                    // Approved first; among approved the day the schedule gave them (regular, then system), among
+                    // the ones waiting the day they asked for; then the oldest.
                     .comparing((DayOffRequest r) -> r.getStatus() != DayOffStatus.APPROVED)
-                    .thenComparing(r -> !r.isRegular())
-                    .thenComparing(r -> !r.isReserved())
+                    .thenComparing(r -> r.getStatus() == DayOffStatus.APPROVED ? !r.isRegular() : r.isReserved())
+                    .thenComparing(r -> r.getStatus() == DayOffStatus.APPROVED ? !r.isReserved() : false)
                     .thenComparing(r -> r.getCreatedAt() == null ? Instant.EPOCH : r.getCreatedAt())
                     .thenComparing(DayOffRequest::getId)).toList();
-            out.add(new Extra(list.getFirst(), weekStart(list.getFirst().getOffDate()),
-                    sorted.subList(0, usual), sorted.subList(usual, sorted.size())));
+            List<DayOffRequest> kept = new ArrayList<>(sorted.subList(0, Math.min(usual, sorted.size())));
+            List<DayOffRequest> extra = new ArrayList<>(sorted.subList(kept.size(), sorted.size()));
+            // Placeholders are only surplus once enough real days are approved.
+            long room = Math.max(0, usual - approved);
+            for (int i = 0; i < placeholders.size(); i++) {
+                (i < room ? kept : extra).add(placeholders.get(i));
+            }
+            if (extra.isEmpty()) {
+                return;
+            }
+            out.add(new Extra(list.getFirst(), weekStart(list.getFirst().getOffDate()), kept, extra));
         });
         return out;
     }
@@ -1005,7 +1049,8 @@ public class DayOffService {
         // Days held for them that week go back to work: the ones the system picked and, when they chose this day
         // themselves (not an emergency), their regular day too.
         String message = r.getReviewNote();
-        String back = releasedNote(reservations.trim(e, date, !r.isEmergency()));
+        // On a published week too: approving a day they chose means the day held for them goes (one day off, not two).
+        String back = releasedNote(reservations.trim(e, date, !r.isEmergency(), !r.isEmergency()));
         if (back != null) {
             message = message == null ? back : message + " " + back;
         }

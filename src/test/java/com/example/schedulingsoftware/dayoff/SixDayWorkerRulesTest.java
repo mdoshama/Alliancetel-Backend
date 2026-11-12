@@ -196,6 +196,60 @@ class SixDayWorkerRulesTest {
         assertTrue(daysOff(anna).stream().noneMatch(DayOffRequest::isEmergency), "nothing for a manager to decide");
     }
 
+    /** Safwan's week: he asked for Monday (still waiting) while the system held Saturday for him until then. */
+    private DayOffRequest[] safwansWeek() {
+        reservations.reserveWeek(area, week);
+        DayOffRequest placeholder = daysOff(anna).getFirst();
+        assertTrue(placeholder.isReserved() && placeholder.getStatus() == DayOffStatus.PENDING);
+        LocalDate mine = placeholder.getOffDate().equals(week) ? week.plusDays(1) : week;
+        DayOffRequest asked = new DayOffRequest();
+        asked.setEmployee(employeeService.getEmployee(anna));
+        asked.setOffDate(mine);
+        asked.setStatus(DayOffStatus.PENDING);
+        requests.saveAndFlush(asked);
+        return new DayOffRequest[] { asked, placeholder };
+    }
+
+    @Test
+    void aWaitingDayTheyAskedForNextToASystemPlaceholderIsNotExtra() {
+        safwansWeek();
+        assertTrue(dayOffService.extraDaysOff().stream().noneMatch(x -> x.employeeId().equals(anna)),
+                "one day asked for + the system's placeholder is not two days off");
+        dayOffService.moveExtraDaysToEmergency();
+        assertTrue(daysOff(anna).stream().noneMatch(DayOffRequest::isEmergency), "nothing turned into an emergency");
+    }
+
+    @Test
+    void approvingTheirDayOnAPublishedWeekReleasesThePlaceholder() {
+        DayOffRequest[] days = safwansWeek();
+        scheduleService.publish(scheduleService.generate(area, week, true).id());
+        dayOffService.approve(days[0].getId(), "OK");
+        assertEquals(List.of(days[0].getOffDate()), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList(),
+                "only the day they asked for");
+        var row = scheduleService.find(area, week).orElseThrow().rows().stream()
+                .filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
+        assertEquals(1, row.days().stream().filter(d -> !d.type().name().equals("WORK")).count(), "one day off");
+    }
+
+    @Test
+    void wronglyMovedDaysGoBackToNormalRequests() {
+        DayOffRequest[] days = safwansWeek();
+        // What the first version of the tool did to Safwan's Monday.
+        DayOffRequest asked = days[0];
+        asked.setEmergency(true);
+        asked.setReason("Extra day off");
+        asked.setReviewNote(DayOffService.MOVED_NOTE + "System Admin: Anna already had 1 day off that week.");
+        requests.saveAndFlush(asked);
+
+        dayOffService.undoMistakenEmergencyMoves();
+        DayOffRequest back = requests.findById(asked.getId()).orElseThrow();
+        assertTrue(!back.isEmergency());
+        assertEquals(DayOffStatus.PENDING, back.getStatus());
+        assertNull(back.getReason());
+        assertNull(back.getReviewNote());
+        assertTrue(dayOffService.extraDaysOff().stream().noneMatch(x -> x.employeeId().equals(anna)));
+    }
+
     @Test
     void theSystemDoesNotGiveADayOffWhereTheStoresAreShort() {
         // North and South each need 1. With both North people's regular day on Monday, North is short that day.

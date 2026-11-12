@@ -327,8 +327,17 @@ public class DayOffReservations {
      */
     @Transactional
     public List<DayOffRequest> trim(Employee e, LocalDate anyDayInWeek, boolean regularToo) {
+        return trim(e, anyDayInWeek, regularToo, false);
+    }
+
+    /**
+     * Same, and with {@code evenPublished} also on a published week (a day they chose was just approved there: the
+     * day held for them goes back to work, so they have one day off, not two).
+     */
+    @Transactional
+    public List<DayOffRequest> trim(Employee e, LocalDate anyDayInWeek, boolean regularToo, boolean evenPublished) {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
-        if (published(e.getArea() == null ? null : e.getArea().getId(), week)) {
+        if (!evenPublished && published(e.getArea() == null ? null : e.getArea().getId(), week)) {
             return List.of();
         }
         List<DayOffRequest> held = repository
