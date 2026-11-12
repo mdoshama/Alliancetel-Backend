@@ -384,26 +384,27 @@ public class DayOffReservations {
     }
 
     private long ownDaysOff(Employee e, LocalDate week) {
-        // Approved days, and days they asked for that are still waiting: once someone asks for a day, the system
-        // doesn't also hold another one for them (if their request is turned down, a day is reserved again then).
-        // An emergency only counts once approved: it comes on top of their usual day.
+        // Approved days, and days they asked for that are still waiting (emergencies too): once someone asks for a
+        // day, the system doesn't also hold another one for them (if it's turned down, a day is held again then).
         return repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(e.getId(), week,
-                week.plusDays(6), List.of(DayOffStatus.APPROVED))
-                + repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(e.getId(),
-                        week, week.plusDays(6), List.of(DayOffStatus.PENDING));
+                week.plusDays(6), List.of(DayOffStatus.APPROVED, DayOffStatus.PENDING));
     }
 
     /**
-     * People who asked for their days themselves (approved or still waiting) don't keep days the system held for them
-     * that week: those go (a day they chose replaces their regular day too). Cleans up weeks from before this rule.
+     * People who asked for their days themselves (approved or still waiting, emergencies too) don't keep days the
+     * system picked for them that week: those go (a day they chose replaces their regular day too). Cleans up weeks
+     * from before this rule.
      */
     private int releaseHeldForAskers(Long areaId, LocalDate week) {
         int n = 0;
         for (Employee e : weekRequests.staffOf(areaId)) {
             boolean asked = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
                     e.getId(), week, week.plusDays(6), List.of(DayOffStatus.PENDING, DayOffStatus.APPROVED)) > 0;
-            if (asked) {
-                n += trim(e, week, true).size();
+            boolean emergency = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndReservedFalse(e.getId(),
+                    week, week.plusDays(6), List.of(DayOffStatus.PENDING, DayOffStatus.APPROVED)) > 0;
+            if (asked || emergency) {
+                // A day they chose replaces their regular day too; an emergency only the day the system picked.
+                n += trim(e, week, asked).size();
             }
         }
         return n;

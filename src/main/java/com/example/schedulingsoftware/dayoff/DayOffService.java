@@ -348,6 +348,10 @@ public class DayOffService {
         if (emergency) {
             // Emergencies are the only requests a manager or admin decides on (they can break the coverage rules).
             saved.forEach(r -> created.add(DayOffResponse.from(r)));
+            // A day the system picked for them that week goes: they work it (their regular day stays). Published
+            // weeks keep it until the emergency is approved; if it's turned down, a day is held for them again.
+            new TreeSet<>(saved.stream().map(r -> weekStart(r.getOffDate())).toList())
+                    .forEach(monday -> reservations.trim(employee, monday, false));
             return created;
         }
         // Everything else passed the checks above (store covered, one person per store, primaries and floaters
@@ -1049,8 +1053,9 @@ public class DayOffService {
         // Days held for them that week go back to work: the ones the system picked and, when they chose this day
         // themselves (not an emergency), their regular day too.
         String message = r.getReviewNote();
-        // On a published week too: approving a day they chose means the day held for them goes (one day off, not two).
-        String back = releasedNote(reservations.trim(e, date, !r.isEmergency(), !r.isEmergency()));
+        // On a published week too: approving a day they chose (or their emergency) means the day the system held for
+        // them goes, so they don't end up with an extra day off (an emergency leaves their regular day alone).
+        String back = releasedNote(reservations.trim(e, date, !r.isEmergency(), true));
         if (back != null) {
             message = message == null ? back : message + " " + back;
         }

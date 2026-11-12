@@ -450,13 +450,11 @@ public class WeekRequests {
                     .map(DayOffRequest::getOffDate).toList());
             dates.addAll(planned);
             dates.sort(null);
-            // An emergency still waiting isn't a day off yet: until a manager gives it, they keep a day of their own
-            // (given back if the emergency is approved).
-            int waitingEmergencies = (int) all.stream()
-                    .filter(r -> r.isEmergency() && r.getStatus() == DayOffStatus.PENDING).count();
+            // An emergency still waiting counts as their day: the system doesn't hold another one meanwhile (if it's
+            // turned down, a day is held for them again).
             return new PersonStatus(e.getId(), e.getFullName(),
                     e.getHomeStore() == null ? null : e.getHomeStore().getName(), state, dates,
-                    Math.max(0, 7 - e.getWorkDaysPerWeek()), dates.size() - waitingEmergencies, e.getPhone());
+                    Math.max(0, 7 - e.getWorkDaysPerWeek()), dates.size(), e.getPhone());
         }).toList();
     }
 

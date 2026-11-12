@@ -262,6 +262,52 @@ class SixDayWorkerRulesTest {
         assertTrue(daysOff(anna).getFirst().isReserved(), "a day held for him again");
     }
 
+    /** Surror's week: the system holds a day for Anna; Ben (same store) takes another day, so Anna can only ask it as an emergency. */
+    private LocalDate[] surrorsWeek() {
+        reservations.reserveWeek(area, week);
+        LocalDate held = daysOff(anna).getFirst().getOffDate();
+        assertTrue(daysOff(anna).getFirst().isReserved());
+        LocalDate bens = daysOff(ben).isEmpty() ? null : daysOff(ben).getFirst().getOffDate();
+        LocalDate wanted = week.plusDays(6).equals(held) || week.plusDays(6).equals(bens) ? week.plusDays(5) : week.plusDays(6);
+        TestUsers.signInAs(ben, Role.EMPLOYEE, area);
+        dayOffService.create(new CreateDayOffRequest(ben, List.of(wanted), null, null));
+        return new LocalDate[] { held, wanted };
+    }
+
+    @Test
+    void anEmergencyReplacesTheDayTheSystemPicked() {
+        LocalDate[] d = surrorsWeek();
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        var urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(d[1]), "Family", true)).getFirst();
+        assertEquals(List.of(d[1]), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList(),
+                "the system's day is gone: Anna works it");
+        // The hourly run doesn't hold another day while the emergency waits.
+        TestUsers.signInAsAdmin();
+        reservations.reserveWeek(area, week);
+        assertEquals(1, daysOff(anna).size());
+        // Turned down: a day is held for her again.
+        dayOffService.reject(urgent.id(), "Sorry");
+        assertEquals(1, daysOff(anna).size());
+        assertTrue(daysOff(anna).getFirst().isReserved());
+    }
+
+    @Test
+    void onAPublishedWeekTheSystemDayGoesWhenTheEmergencyIsApproved() {
+        LocalDate[] d = surrorsWeek();
+        TestUsers.signInAsAdmin();
+        scheduleService.publish(scheduleService.generate(area, week, true).id());
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        var urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(d[1]), "Family", true)).getFirst();
+        assertEquals(2, daysOff(anna).size(), "published: the system's day stays until a decision");
+        TestUsers.signInAsAdmin();
+        dayOffService.approve(urgent.id(), "OK");
+        assertEquals(List.of(d[1]), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList());
+        var row = scheduleService.find(area, week).orElseThrow().rows().stream()
+                .filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
+        assertEquals(1, row.days().stream().filter(x -> !x.type().name().equals("WORK")).count(),
+                "one day off on the schedule: the emergency");
+    }
+
     @Test
     void theSystemDoesNotGiveADayOffWhereTheStoresAreShort() {
         // North and South each need 1. With both North people's regular day on Monday, North is short that day.
