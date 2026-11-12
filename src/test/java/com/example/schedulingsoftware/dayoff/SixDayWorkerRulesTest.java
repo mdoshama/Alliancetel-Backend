@@ -251,6 +251,18 @@ class SixDayWorkerRulesTest {
     }
 
     @Test
+    void someoneWhoAskedForADayHasNoOtherDayHeld() {
+        DayOffRequest[] days = safwansWeek();
+        // The next reservation run (hourly, or at start-up) drops the placeholder: Safwan asked for Monday.
+        reservations.reserveWeek(area, week);
+        assertEquals(List.of(days[0].getOffDate()), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList());
+        // If his request is turned down, the system holds a day for him again.
+        dayOffService.reject(days[0].getId(), "Busy");
+        assertEquals(1, daysOff(anna).size());
+        assertTrue(daysOff(anna).getFirst().isReserved(), "a day held for him again");
+    }
+
+    @Test
     void theSystemDoesNotGiveADayOffWhereTheStoresAreShort() {
         // North and South each need 1. With both North people's regular day on Monday, North is short that day.
         employeeService.setRegularDaysOff(anna, List.of(DayOfWeek.MONDAY));
