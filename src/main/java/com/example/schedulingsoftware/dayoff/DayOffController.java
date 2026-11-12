@@ -104,6 +104,18 @@ public class DayOffController {
         return dayOffService.takenDays(employeeId, from, to);
     }
 
+    /** Admins: people with more days off in a week than they normally get (nothing changes). */
+    @GetMapping("/extra-days")
+    public List<DayOffDtos.ExtraDaysOff> extraDays() {
+        return dayOffService.extraDaysOff();
+    }
+
+    /** Admins: moves those extra days to the emergency requests for a manager to decide. */
+    @PostMapping("/extra-days/move")
+    public DayOffDtos.ExtraDaysMoved moveExtraDays() {
+        return dayOffService.moveExtraDaysToEmergency();
+    }
+
     /** Approve many at once; with onlyIfCovered, requests that would leave a store short stay pending. */
     @PostMapping("/approve-many")
     public ApproveManyResult approveMany(@Valid @RequestBody ApproveManyRequest body) {

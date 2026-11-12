@@ -196,6 +196,18 @@ public final class DayOffDtos {
     }
 
     /**
+     * Someone with more days off in a week than they normally get (e.g. 2 for a 6-day worker), from today on.
+     * {@code kept} stay as they are; {@code extra} are the ones moved to emergency requests for a manager to decide.
+     */
+    public record ExtraDaysOff(Long employeeId, String employeeName, String areaName, int workDaysPerWeek,
+            LocalDate weekStart, List<WeekDayOff> kept, List<WeekDayOff> extra) {
+    }
+
+    /** What moving the extra days did. */
+    public record ExtraDaysMoved(int people, int days, List<ExtraDaysOff> moved) {
+    }
+
+    /**
      * Another day off the same person has that week. {@code kind}: REGULAR (their usual day), SYSTEM (the system gave
      * it), ASKED (they asked for it) or EMERGENCY.
      */

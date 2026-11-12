@@ -716,6 +716,117 @@ public class DayOffService {
         return weeks;
     }
 
+    /**
+     * Admins: people who have more days off in a week than they normally get (today on), e.g. a 6-day worker given 2
+     * by an earlier version. Days a manager or admin gave directly ("Given by …") and emergencies don't count. The
+     * day the schedule gave them comes first, then the oldest; the rest are extra.
+     */
+    @Transactional(readOnly = true)
+    public List<DayOffDtos.ExtraDaysOff> extraDaysOff() {
+        requireAdminUser();
+        return findExtraDaysOff().stream().map(Extra::view).toList();
+    }
+
+    /**
+     * Admins: moves those extra days to the emergency requests, waiting for a manager. Until someone approves them,
+     * the person is back on the schedule those days (approving takes them off again). An extra day the system only
+     * planned (nobody asked for it, not approved) is simply dropped: they work that day.
+     */
+    @Transactional
+    public DayOffDtos.ExtraDaysMoved moveExtraDaysToEmergency() {
+        CurrentUser user = requireAdminUser();
+        List<Extra> found = findExtraDaysOff();
+        int days = 0;
+        for (Extra x : found) {
+            for (DayOffRequest r : x.extra()) {
+                if (r.isReserved() && r.getStatus() == DayOffStatus.PENDING) {
+                    // Only planned by the system, nobody asked for it: it goes, and they work that day.
+                    repository.delete(r);
+                    repository.flush();
+                    days++;
+                    continue;
+                }
+                boolean wasApproved = r.getStatus() == DayOffStatus.APPROVED;
+                r.setEmergency(true);
+                r.setReserved(false);
+                r.setRegular(false);
+                r.setStatus(DayOffStatus.PENDING);
+                r.setReviewedAt(null);
+                r.setReviewNote("Moved to emergency requests by " + user.fullName() + ": "
+                        + r.getEmployee().getFirstName() + " already had " + x.kept().size() + " day"
+                        + (x.kept().size() == 1 ? "" : "s") + " off that week.");
+                if (r.getReason() == null || r.getReason().isBlank()
+                        || DayOffReservations.RESERVED_REASON.equals(r.getReason())
+                        || DayOffReservations.REGULAR_REASON.equals(r.getReason())) {
+                    r.setReason("Extra day off");
+                }
+                repository.flush();
+                if (wasApproved) {
+                    scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate());
+                }
+                days++;
+            }
+        }
+        org.slf4j.LoggerFactory.getLogger(DayOffService.class).info("{} moved {} extra day(s) off of {} people to emergency requests", user.email(), days, found.size());
+        return new DayOffDtos.ExtraDaysMoved(found.size(), days, found.stream().map(Extra::view).toList());
+    }
+
+    private record Extra(DayOffRequest any, LocalDate week, List<DayOffRequest> kept, List<DayOffRequest> extra) {
+        DayOffDtos.ExtraDaysOff view() {
+            var e = any.getEmployee();
+            return new DayOffDtos.ExtraDaysOff(e.getId(), e.getFullName(),
+                    e.getArea() == null ? null : e.getArea().getName(), e.getWorkDaysPerWeek(), week,
+                    kept.stream().map(DayOffDtos.WeekDayOff::from).toList(),
+                    extra.stream().map(DayOffDtos.WeekDayOff::from).toList());
+        }
+    }
+
+    private List<Extra> findExtraDaysOff() {
+        LocalDate today = portal.today();
+        Map<String, List<DayOffRequest>> byPersonWeek = new java.util.TreeMap<>();
+        for (DayOffRequest r : repository.findByEmergencyFalseAndStatusInAndOffDateGreaterThanEqual(OPEN_STATUSES,
+                today)) {
+            Employee e = r.getEmployee();
+            if (!e.isActive() || givenDirectly(r)) {
+                continue;
+            }
+            String key = e.getFullName() + "|" + e.getId() + "|" + weekStart(r.getOffDate());
+            byPersonWeek.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
+        }
+        List<Extra> out = new ArrayList<>();
+        byPersonWeek.forEach((key, list) -> {
+            Employee e = list.getFirst().getEmployee();
+            int usual = Math.max(0, 7 - e.getWorkDaysPerWeek());
+            if (list.size() <= usual) {
+                return;
+            }
+            List<DayOffRequest> sorted = list.stream().sorted(java.util.Comparator
+                    // Approved first, then the day the schedule gave them (regular, then system), then the oldest.
+                    .comparing((DayOffRequest r) -> r.getStatus() != DayOffStatus.APPROVED)
+                    .thenComparing(r -> !r.isRegular())
+                    .thenComparing(r -> !r.isReserved())
+                    .thenComparing(r -> r.getCreatedAt() == null ? Instant.EPOCH : r.getCreatedAt())
+                    .thenComparing(DayOffRequest::getId)).toList();
+            out.add(new Extra(list.getFirst(), weekStart(list.getFirst().getOffDate()),
+                    sorted.subList(0, usual), sorted.subList(usual, sorted.size())));
+        });
+        return out;
+    }
+
+    /** A day a manager or admin gave directly (it skipped the usual checks on purpose). */
+    private static boolean givenDirectly(DayOffRequest r) {
+        String note = r.getReviewNote();
+        return note != null && note.startsWith("Given by ") && !note.startsWith("Given by the system");
+    }
+
+    private CurrentUser requireAdminUser() {
+        CurrentUser user = accessPolicy.current();
+        if (!user.isAdmin()) {
+            throw new AccessDeniedException("Only admins can do this.");
+        }
+        return user;
+    }
+
     /** Whether they could get this day with a normal request right now. */
     private boolean openForNormalRequest(Employee employee, LocalDate date) {
         if (date.isBefore(portal.today()) || (requestWindow && !openForRequests(employee, date))) {

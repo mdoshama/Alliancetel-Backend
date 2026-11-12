@@ -133,6 +133,70 @@ class SixDayWorkerRulesTest {
     }
 
     @Test
+    void extraDaysFromBeforeTheFixMoveToEmergencyRequests() {
+        // As the old version did: Monday on the published schedule, then Wednesday approved on top.
+        employeeService.setRegularDaysOff(anna, List.of(DayOfWeek.MONDAY));
+        reservations.reserveWeek(area, week);
+        Long scheduleId = scheduleService.generate(area, week, true).id();
+        scheduleService.publish(scheduleId);
+        DayOffRequest extra = new DayOffRequest();
+        extra.setEmployee(employeeService.getEmployee(anna));
+        extra.setOffDate(week.plusDays(2));
+        extra.setStatus(DayOffStatus.APPROVED);
+        extra.setReviewNote(DayOffService.AUTO_NOTE);
+        requests.saveAndFlush(extra);
+        scheduleService.applyApprovedDayOff(employeeService.getEmployee(anna), week.plusDays(2));
+        // A day a manager gave on purpose doesn't count.
+        DayOffRequest given = new DayOffRequest();
+        given.setEmployee(employeeService.getEmployee(ben));
+        given.setOffDate(week.plusDays(5));
+        given.setStatus(DayOffStatus.APPROVED);
+        given.setReviewNote("Given by Mia Manager.");
+        requests.saveAndFlush(given);
+
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        assertThrows(org.springframework.security.access.AccessDeniedException.class, () -> dayOffService.extraDaysOff());
+        TestUsers.signInAsAdmin();
+        var found = dayOffService.extraDaysOff().stream().filter(x -> x.employeeId().equals(anna)).toList();
+        assertEquals(1, found.size());
+        assertEquals(week, found.getFirst().kept().getFirst().date(), "the scheduled Monday stays");
+        assertEquals(week.plusDays(2), found.getFirst().extra().getFirst().date());
+        assertTrue(dayOffService.extraDaysOff().stream().noneMatch(x -> x.employeeId().equals(ben)));
+
+        var moved = dayOffService.moveExtraDaysToEmergency();
+        assertTrue(moved.days() >= 1);
+        DayOffRequest now = requests.findById(extra.getId()).orElseThrow();
+        assertTrue(now.isEmergency());
+        assertEquals(DayOffStatus.PENDING, now.getStatus());
+        var row = scheduleService.find(area, week).orElseThrow().rows().stream()
+                .filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
+        assertEquals("WORK", row.days().get(2).type().name(), "back at work until a manager decides");
+        assertTrue(dayOffService.extraDaysOff().stream().noneMatch(x -> x.employeeId().equals(anna)), "nothing left");
+        // The manager approves it after all: off again.
+        dayOffService.approve(now.getId(), "OK");
+        row = scheduleService.find(area, week).orElseThrow().rows().stream()
+                .filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
+        assertEquals("REQUESTED_OFF", row.days().get(2).type().name());
+    }
+
+    @Test
+    void anExtraDayOnlyPlannedByTheSystemIsDropped() {
+        reservations.reserveWeek(area, week);
+        DayOffRequest planned = daysOff(anna).getFirst();
+        assertTrue(planned.isReserved() && planned.getStatus() == DayOffStatus.PENDING);
+        LocalDate other = planned.getOffDate().equals(week.plusDays(4)) ? week.plusDays(5) : week.plusDays(4);
+        DayOffRequest asked = new DayOffRequest();
+        asked.setEmployee(employeeService.getEmployee(anna));
+        asked.setOffDate(other);
+        asked.setStatus(DayOffStatus.APPROVED);
+        asked.setReviewNote(DayOffService.AUTO_NOTE);
+        requests.saveAndFlush(asked);
+        dayOffService.moveExtraDaysToEmergency();
+        assertEquals(List.of(other), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList());
+        assertTrue(daysOff(anna).stream().noneMatch(DayOffRequest::isEmergency), "nothing for a manager to decide");
+    }
+
+    @Test
     void theSystemDoesNotGiveADayOffWhereTheStoresAreShort() {
         // North and South each need 1. With both North people's regular day on Monday, North is short that day.
         employeeService.setRegularDaysOff(anna, List.of(DayOfWeek.MONDAY));

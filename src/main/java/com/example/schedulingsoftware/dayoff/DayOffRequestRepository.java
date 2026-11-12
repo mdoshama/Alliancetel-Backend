@@ -68,5 +68,8 @@ public interface DayOffRequestRepository
     long countForArea(@Param("areaId") Long areaId, @Param("status") DayOffStatus status,
             @Param("from") LocalDate from, @Param("to") LocalDate to);
 
+    List<DayOffRequest> findByEmergencyFalseAndStatusInAndOffDateGreaterThanEqual(
+            java.util.Collection<DayOffStatus> statuses, LocalDate from);
+
     List<DayOffRequest> findByReservedTrueAndStatusAndOffDateGreaterThanEqual(DayOffStatus status, LocalDate from);
 }
