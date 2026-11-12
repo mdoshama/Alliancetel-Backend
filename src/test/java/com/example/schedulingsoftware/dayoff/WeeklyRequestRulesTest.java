@@ -116,9 +116,11 @@ class WeeklyRequestRulesTest {
     @Test
     void oneEmergencyRequestAMonth() {
         LocalDate next = today.plusMonths(1);
-        as(cara);
+        // Entered by a manager (that far ahead is past the two weeks people can ask for themselves).
+        TestUsers.signInAsAdmin();
         assertEquals(2, dayOffService.create(new CreateDayOffRequest(cara,
                 List.of(next.withDayOfMonth(10), next.withDayOfMonth(11)), "Sick", true)).size());
+        as(cara);
         BusinessRuleException e = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
                 new CreateDayOffRequest(cara, List.of(next.withDayOfMonth(20)), "Again", true)));
         assertTrue(e.getMessage().contains("emergency request for"), e.getMessage());
@@ -154,6 +156,45 @@ class WeeklyRequestRulesTest {
         assertEquals(0, weekRequests.status(area, week).missing().size());
         var schedule = scheduleService.generate(area, week);
         assertEquals(3, schedule.rows().size());
+    }
+
+    @Test
+    void sixDayWorkersGetOneDayOffAndMoreNeedsAnEmergencyOnceTheWeekIsFull() {
+        as(anna);
+        // While the week still has open days, an emergency isn't the way to ask.
+        BusinessRuleException early = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(open.plusDays(3)), "Sick", true)));
+        assertTrue(early.getMessage().contains("still has open days"), early.getMessage());
+
+        assertEquals(1, dayOffService.create(new CreateDayOffRequest(anna, List.of(open.plusDays(1)), null, null)).size());
+        // She works 6 days, so one normal day off is all: a second one is refused.
+        BusinessRuleException second = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(open.plusDays(3)), null, null)));
+        assertTrue(second.getMessage().contains("only 1 day off"), second.getMessage());
+
+        // Now the week is full for her: an emergency goes to a manager.
+        var urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(open.plusDays(3)), "Sick", true)).getFirst();
+        assertTrue(urgent.emergency());
+        assertEquals(DayOffStatus.PENDING, urgent.status());
+    }
+
+    @Test
+    void fiveDayWorkersGetTwoDaysOff() {
+        TestUsers.signInAsAdmin();
+        Long eve = employeeService.create(new EmployeeRequest("R-21", "Eve", "Rules", "r-21@test.example", null,
+                Role.EMPLOYEE, area, store, 5, true, null)).employee().id();
+        as(eve);
+        assertEquals(2, dayOffService.create(new CreateDayOffRequest(eve,
+                List.of(open.plusDays(1), open.plusDays(3)), null, null)).size());
+    }
+
+    @Test
+    void peopleCanAskForThemselvesUpToTwoWeeksAhead() {
+        as(anna);
+        LocalDate tooFar = DayOffService.weekStart(today).plusWeeks(3);
+        BusinessRuleException e = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(tooFar), "Wedding", true)));
+        assertTrue(e.getMessage().contains("2 weeks ahead"), e.getMessage());
     }
 
     @Test

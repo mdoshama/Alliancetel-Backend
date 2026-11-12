@@ -144,11 +144,10 @@ class ReservedDaysOffTest {
         List<LocalDate> open = week.datesUntil(week.plusDays(7))
                 .filter(d -> !d.equals(reserved)).filter(d -> d.isAfter(portal.today())).toList();
         LocalDate wanted = open.stream().filter(d -> d.isBefore(reserved)).findFirst().orElse(open.getFirst());
-        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
-        // An emergency waits for a decision, so it can be approved in the same batch as her reserved day.
+        // An emergency waits for a decision, so it can be approved in the same batch as her reserved day. A manager
+        // enters it (asking for herself, an emergency needs a full week).
         Long asked = dayOffService.create(new CreateDayOffRequest(anna, List.of(wanted), "Family", true)).getFirst().id();
 
-        TestUsers.signInAsAdmin();
         var result = assertDoesNotThrow(() -> dayOffService.approveMany(List.of(reservedId, asked), false));
         assertTrue(result.approved().stream().anyMatch(r -> r.id().equals(asked)));
         if (wanted.isBefore(reserved)) {
@@ -164,9 +163,8 @@ class ReservedDaysOffTest {
         LocalDate reserved = daysOff(cara).getFirst().getOffDate();
         LocalDate other = week.datesUntil(week.plusDays(7))
                 .filter(d -> !d.equals(reserved)).filter(d -> d.isAfter(portal.today())).findFirst().orElseThrow();
-        TestUsers.signInAs(cara, Role.EMPLOYEE, area);
+        // Entered by a manager: asking for herself, an emergency needs a full week.
         Long id = dayOffService.create(new CreateDayOffRequest(cara, List.of(other), "Urgent", true)).getFirst().id();
-        TestUsers.signInAsAdmin();
         dayOffService.reject(id, "Busy day");
         List<DayOffRequest> mine = daysOff(cara);
         assertEquals(1, mine.size());
@@ -328,9 +326,9 @@ class ReservedDaysOffTest {
         dayOffService.create(new CreateDayOffRequest(anna, List.of(regular), null, null));
         assertTrue(onDay(anna, regular).isRegular());
         assertEquals(DayOffStatus.APPROVED, onDay(anna, regular).getStatus());
-        // An emergency goes to a manager; approving it doesn't take her regular day away.
-        Long urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(other), "Sick", true)).getFirst().id();
+        // An emergency (entered by a manager) doesn't take her regular day away when it's approved.
         TestUsers.signInAsAdmin();
+        Long urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(other), "Sick", true)).getFirst().id();
         dayOffService.approve(urgent, null);
         assertTrue(onDay(anna, regular) != null && onDay(anna, regular).isRegular(), "regular day kept");
     }
@@ -409,9 +407,9 @@ class ReservedDaysOffTest {
         TestUsers.signInAs(dee, Role.EMPLOYEE, area);
         assertThrows(BusinessRuleException.class,
                 () -> dayOffService.create(new CreateDayOffRequest(dee, List.of(day), null, null)));
-        // An emergency still can be sent; approving it leaves Cara's regular day where it is.
-        Long emergency = dayOffService.create(new CreateDayOffRequest(dee, List.of(day), "Urgent", true)).getFirst().id();
+        // An emergency (entered by a manager) still can be sent; approving it leaves Cara's regular day where it is.
         TestUsers.signInAsAdmin();
+        Long emergency = dayOffService.create(new CreateDayOffRequest(dee, List.of(day), "Urgent", true)).getFirst().id();
         dayOffService.approve(emergency, null);
         assertTrue(requests.findById(regularId).isPresent(), "regular day stays");
         assertEquals(DayOffStatus.PENDING, requests.findById(regularId).orElseThrow().getStatus());

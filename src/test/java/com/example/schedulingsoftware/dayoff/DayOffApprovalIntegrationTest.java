@@ -208,8 +208,9 @@ class DayOffApprovalIntegrationTest {
 
     @Test
     void onlyOnePersonPerStoreCanBeOffOnADay() {
+        List<Long> extras = new java.util.ArrayList<>();
         for (int i = 4; i <= 7; i++) {
-            employee("A-" + i, "Extra" + i); // enough people that the area limit isn't what stops anyone here
+            extras.add(employee("A-" + i, "Extra" + i)); // enough people that the area limit isn't what stops anyone here
         }
         LocalDate wed = monday.plusDays(2);
         dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null));
@@ -230,11 +231,11 @@ class DayOffApprovalIntegrationTest {
         dayOffService.create(new CreateDayOffRequest(floater, List.of(wed), null, null));
         assertTrue(dayOffService.takenDays(floater, monday, monday.plusDays(6)).isEmpty());
 
-        // A rejected request frees the day again.
-        Long annaThu = dayOffService.create(new CreateDayOffRequest(anna, List.of(wed.plusDays(2)), null, null))
+        // A rejected request frees the day again (6-day workers get one normal day a week, so two colleagues).
+        Long fri = dayOffService.create(new CreateDayOffRequest(extras.get(0), List.of(wed.plusDays(2)), null, null))
                 .getFirst().id();
-        dayOffService.changeDecision(annaThu, DayOffStatus.REJECTED, "Busy");
-        dayOffService.create(new CreateDayOffRequest(ben, List.of(wed.plusDays(2)), null, null));
+        dayOffService.changeDecision(fri, DayOffStatus.REJECTED, "Busy");
+        dayOffService.create(new CreateDayOffRequest(extras.get(1), List.of(wed.plusDays(2)), null, null));
     }
 
     @Test
@@ -254,7 +255,8 @@ class DayOffApprovalIntegrationTest {
         assertEquals(wed, taken.getFirst().date());
 
         // Other days are open, an emergency still goes through, and a rejected request frees the day.
-        dayOffService.create(new CreateDayOffRequest(cara, List.of(wed.plusDays(1)), null, null));
+        assertTrue(dayOffService.takenDays(cara, monday, monday.plusDays(6)).stream()
+                .noneMatch(t -> t.date().equals(wed.plusDays(1))), "Thursday is still open for her");
         dayOffService.changeDecision(annaWed, DayOffStatus.REJECTED, "Busy");
         dayOffService.create(new CreateDayOffRequest(cara, List.of(wed), null, null));
         BusinessRuleException again = assertThrows(BusinessRuleException.class,
@@ -281,7 +283,7 @@ class DayOffApprovalIntegrationTest {
     @Test
     void emergencyRequestsSkipTheStoreRuleAndWeeklyLimitButNeedApproval() {
         LocalDate tue = monday.plusDays(1);
-        dayOffService.create(new CreateDayOffRequest(anna, List.of(tue, tue.plusDays(1)), null, null)); // her 2 for the week
+        dayOffService.create(new CreateDayOffRequest(anna, List.of(tue), null, null)); // works 6 days: her 1 for the week
         DayOffResponse urgent = dayOffService.create(
                 new CreateDayOffRequest(anna, List.of(tue.plusDays(2)), "Hospital", true)).getFirst();
         assertTrue(urgent.emergency());

@@ -115,6 +115,8 @@ class AccessRulesIntegrationTest {
     @Test
     void managerCannotApproveOwnRequest() {
         TestUsers.signInAs(sdManager, Role.MANAGER, sanDiego);
+        // Their normal day first: asking for yourself, an emergency is only for a week that's full.
+        dayOffService.create(new CreateDayOffRequest(sdManager, List.of(nextMonday.plusDays(1)), null, null));
         Long own = dayOffService.create(new CreateDayOffRequest(sdManager, List.of(nextMonday), "Urgent", true)).getFirst().id();
         assertThrows(AccessDeniedException.class, () -> dayOffService.approve(own, null));
 
