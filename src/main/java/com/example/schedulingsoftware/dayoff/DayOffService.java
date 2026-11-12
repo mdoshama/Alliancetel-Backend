@@ -115,7 +115,10 @@ public class DayOffService {
             LocalDate from, LocalDate to, String query, Boolean reserved, Boolean regular, Boolean emergency,
             Integer page, Integer size) {
         var spec = filter(requestedAreaId, requestedEmployeeId, status, from, to, query, reserved, regular, emergency);
-        return PageResponse.from(repository.findAll(spec, PageResponse.request(page, size, Sort.by("offDate", "id"))),
+        // Managers and admins see each person's days together, people A to Z; employees see their own by date.
+        Sort order = accessPolicy.current().isEmployee() ? Sort.by("offDate", "id")
+                : Sort.by("employee.firstName", "employee.lastName", "employee.id", "offDate", "id");
+        return PageResponse.from(repository.findAll(spec, PageResponse.request(page, size, order)),
                 DayOffResponse::from);
     }
 
@@ -210,9 +213,10 @@ public class DayOffService {
         if (selfService && emergency && oneEmergencyPerMonth) {
             checkEmergencyLimit(employee, dates);
         }
-        if (selfService) {
-            checkHorizon(employee, dates);
-        }
+        // For everyone (admins and managers too): not this week (its schedule is made), and only the next two
+        // weeks, or up to the date the area was opened until.
+        checkNotThisWeek(dates, selfService);
+        checkHorizon(employee, dates);
         if (selfService && emergency) {
             checkEmergencyOnlyWhenFull(employee, dates);
         }
@@ -256,7 +260,7 @@ public class DayOffService {
                     repository.delete(existing);
                     repository.flush();
                 }
-            } else if (repository.existsByEmployeeIdAndOffDate(employee.getId(), date)) {
+            } else if (!clearRejected(employee, date)) {
                 throw new BusinessRuleException(employee.getFullName() + " already has a request for " + date + ".");
             }
             requestedPerWeek.merge(weekStart(date), 1, Integer::sum);
@@ -410,7 +414,7 @@ public class DayOffService {
             if (item.date().isBefore(LocalDate.now(zone))) {
                 throw new BusinessRuleException("Can't give a day off in the past (" + item.date() + ").");
             }
-            if (repository.existsByEmployeeIdAndOffDate(e.getId(), item.date())) {
+            if (!clearRejected(e, item.date())) {
                 throw new BusinessRuleException(e.getFullName() + " already has a request for " + dayName(item.date())
                         + ". Pick another day.");
             }
@@ -485,6 +489,22 @@ public class DayOffService {
         area.setRequestsOpenedBy(until == null ? null : accessPolicy.current().fullName());
         area.setRequestsOpenedAt(until == null ? null : Instant.now());
         return new DayOffDtos.OpenUntilResponse(areaId, until, area.getRequestsOpenedBy());
+    }
+
+    /**
+     * This week's schedule is already made: people asking for themselves start at next week. A manager or admin can
+     * still give someone a day off this week.
+     */
+    private void checkNotThisWeek(java.util.Collection<LocalDate> dates, boolean selfService) {
+        LocalDate nextMonday = weekStart(portal.today()).plusWeeks(1);
+        for (LocalDate date : dates) {
+            if (date.isBefore(nextMonday)) {
+                throw new BusinessRuleException("This week's schedule is already made, so " + shortDate(date)
+                        + " can't be requested. " + (selfService
+                                ? "If you need a day off this week, ask your manager."
+                                : "To change this week, edit the schedule itself."));
+            }
+        }
     }
 
     /** The date the area takes requests up to, when a manager opened them further ahead and it hasn't passed. */
@@ -577,24 +597,39 @@ public class DayOffService {
             if (date.isAfter(lastAllowed)) {
                 throw new BusinessRuleException(until != null && until.equals(lastAllowed)
                         ? "Requests are open until " + shortDate(lastAllowed) + ". " + shortDate(date) + " is too far."
-                        : "You can ask for days off up to " + SELF_SERVICE_WEEKS_AHEAD + " weeks ahead (until "
+                        : "Days off can be requested up to " + SELF_SERVICE_WEEKS_AHEAD + " weeks ahead (until "
                                 + shortDate(lastAllowed) + "). " + shortDate(date) + " is too far.");
             }
         }
     }
 
     /** An emergency request is only for a week with no day left that a normal request could get. */
+    /**
+     * An emergency is for a day they can't get with a normal request: the day is full or a colleague at their store
+     * has it, or they've already used their days off that week. A day still open is asked for normally.
+     */
     private void checkEmergencyOnlyWhenFull(Employee employee, java.util.Collection<LocalDate> dates) {
-        TreeSet<LocalDate> weeks = new TreeSet<>();
-        dates.forEach(d -> weeks.add(weekStart(d)));
-        for (LocalDate monday : weeks) {
-            LocalDate open = firstOpenDay(employee, monday);
-            if (open != null) {
-                throw new BusinessRuleException("The week of " + shortDate(monday) + " still has open days ("
-                        + dayName(open) + "), so ask for a normal day off. Emergency requests are only for weeks "
-                        + "that are full.");
+        for (LocalDate date : dates) {
+            if (openForNormalRequest(employee, date)) {
+                throw new BusinessRuleException(dayName(date) + " is still open, so ask for it as a normal day off. "
+                        + "Emergency requests are for days that are full, or once your days off that week are used.");
             }
         }
+    }
+
+    /** Whether they could get this day with a normal request right now. */
+    private boolean openForNormalRequest(Employee employee, LocalDate date) {
+        if (date.isBefore(portal.today()) || (requestWindow && !openForRequests(employee, date))) {
+            return false;
+        }
+        LocalDate monday = weekStart(date);
+        long normal = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
+                employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
+        if (normal >= normalDaysOffPerWeek(employee)) {
+            return false;
+        }
+        boolean taken = takenDays(employee, date, date).stream().anyMatch(t -> t.date().equals(date));
+        return !taken && !hasLiveRequest(employee.getId(), date);
     }
 
     /** The first day in the week they could still get with a normal request, or null when the week is full for them. */
@@ -614,11 +649,34 @@ public class DayOffService {
         takenDays(employee, from, sunday).forEach(t -> taken.add(t.date()));
         for (LocalDate d = from; !d.isAfter(sunday); d = d.plusDays(1)) {
             if ((!requestWindow || openForRequests(employee, d)) && !taken.contains(d)
-                    && !repository.existsByEmployeeIdAndOffDate(employee.getId(), d)) {
+                    && !hasLiveRequest(employee.getId(), d)) {
                 return d;
             }
         }
         return null;
+    }
+
+    /**
+     * Makes the day free to ask for again: a request that was turned down doesn't block a new one for the same day (it
+     * is replaced). Returns false when they still have a live request (waiting or approved) that day.
+     */
+    private boolean clearRejected(Employee employee, LocalDate date) {
+        DayOffRequest existing = repository.findByEmployeeIdAndOffDate(employee.getId(), date).orElse(null);
+        if (existing == null) {
+            return true;
+        }
+        if (existing.getStatus() != DayOffStatus.REJECTED) {
+            return false;
+        }
+        repository.delete(existing);
+        repository.flush();
+        return true;
+    }
+
+    /** A request that day still waiting or given (one that was turned down doesn't count). */
+    private boolean hasLiveRequest(Long employeeId, LocalDate date) {
+        return repository.findByEmployeeIdAndOffDate(employeeId, date)
+                .map(r -> r.getStatus() != DayOffStatus.REJECTED).orElse(false);
     }
 
     /** Whether they already have an emergency request (pending or approved) in the month of this date. */

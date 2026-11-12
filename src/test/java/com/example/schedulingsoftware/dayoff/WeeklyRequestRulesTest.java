@@ -97,33 +97,36 @@ class WeeklyRequestRulesTest {
     }
 
     @Test
-    void employeesCanOnlyAskForTheOpenWeek() {
+    void employeesCanAskForTheNextTwoWeeks() {
+        LocalDate next = DayOffService.weekStart(today).plusWeeks(1);
+        assertEquals(List.of(next, next.plusWeeks(1)), dayOffService.window().openWeeks());
+
         as(anna);
-        assertEquals(1, dayOffService.create(new CreateDayOffRequest(anna, List.of(open.plusDays(1)), null, null)).size());
-
+        assertEquals(1, dayOffService.create(new CreateDayOffRequest(anna, List.of(next.plusDays(1)), null, null)).size());
         as(ben);
-        BusinessRuleException late = assertThrows(BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(ben, List.of(open.minusDays(5)), null, null)));
-        assertTrue(late.getMessage().contains("closed on Friday") || late.getMessage().contains("past"), late.getMessage());
-        BusinessRuleException early = assertThrows(BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(ben, List.of(open.plusWeeks(1)), null, null)));
-        assertTrue(early.getMessage().contains("open on Saturday"), early.getMessage());
+        assertEquals(1, dayOffService.create(new CreateDayOffRequest(ben, List.of(next.plusWeeks(1).plusDays(2)), null, null)).size());
+        // The third week isn't open yet.
+        BusinessRuleException far = assertThrows(BusinessRuleException.class,
+                () -> dayOffService.create(new CreateDayOffRequest(ben, List.of(next.plusWeeks(2).plusDays(2)), null, null)));
+        assertTrue(far.getMessage().contains("open on Saturday") || far.getMessage().contains("ahead"), far.getMessage());
 
-        // A manager or admin entering it for them can make an exception.
+        // Admins and managers follow the same two weeks.
         TestUsers.signInAsAdmin();
-        assertEquals(1, dayOffService.create(new CreateDayOffRequest(ben, List.of(open.plusWeeks(1)), null, null)).size());
+        assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(ben, List.of(next.plusWeeks(2).plusDays(2)), null, null)));
     }
 
     @Test
     void oneEmergencyRequestAMonth() {
-        LocalDate next = today.plusMonths(1);
-        // Entered by a manager (that far ahead is past the two weeks people can ask for themselves).
+        LocalDate nextMonday = DayOffService.weekStart(today).plusWeeks(1);
+        LocalDate first = nextMonday.plusDays(1);
+        // Another day in the same month (within the next two weeks).
+        LocalDate again = first.plusDays(1).getMonth() == first.getMonth() ? first.plusDays(1) : nextMonday;
         TestUsers.signInAsAdmin();
-        assertEquals(2, dayOffService.create(new CreateDayOffRequest(cara,
-                List.of(next.withDayOfMonth(10), next.withDayOfMonth(11)), "Sick", true)).size());
+        assertEquals(1, dayOffService.create(new CreateDayOffRequest(cara, List.of(first), "Sick", true)).size());
         as(cara);
         BusinessRuleException e = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
-                new CreateDayOffRequest(cara, List.of(next.withDayOfMonth(20)), "Again", true)));
+                new CreateDayOffRequest(cara, List.of(again), "Again", true)));
         assertTrue(e.getMessage().contains("emergency request for"), e.getMessage());
     }
 
@@ -162,10 +165,10 @@ class WeeklyRequestRulesTest {
     @Test
     void sixDayWorkersGetOneDayOffAndMoreNeedsAnEmergencyOnceTheWeekIsFull() {
         as(anna);
-        // While the week still has open days, an emergency isn't the way to ask.
+        // An open day isn't asked for as an emergency.
         BusinessRuleException early = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
                 new CreateDayOffRequest(anna, List.of(open.plusDays(3)), "Sick", true)));
-        assertTrue(early.getMessage().contains("still has open days"), early.getMessage());
+        assertTrue(early.getMessage().contains("still open"), early.getMessage());
 
         assertEquals(1, dayOffService.create(new CreateDayOffRequest(anna, List.of(open.plusDays(1)), null, null)).size());
         // She works 6 days, so one normal day off is all: a second one is refused.
@@ -187,6 +190,60 @@ class WeeklyRequestRulesTest {
         as(eve);
         assertEquals(2, dayOffService.create(new CreateDayOffRequest(eve,
                 List.of(open.plusDays(1), open.plusDays(3)), null, null)).size());
+    }
+
+    @Test
+    void thisWeekIsAlreadyMadeSoPeopleStartAtNextWeek() {
+        LocalDate sunday = DayOffService.weekStart(today).plusDays(6);
+        as(anna);
+        BusinessRuleException e = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(sunday), "Sick", true)));
+        assertTrue(e.getMessage().contains("already made"), e.getMessage());
+
+        // Not even an admin or manager: this week is changed on the schedule itself.
+        TestUsers.signInAsAdmin();
+        BusinessRuleException admin = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(sunday), "Sick", true)));
+        assertTrue(admin.getMessage().contains("edit the schedule"), admin.getMessage());
+    }
+
+    @Test
+    void aFullDayCanBeAskedForAsAnEmergencyEvenWithOpenDaysLeft() {
+        LocalDate next = DayOffService.weekStart(today).plusWeeks(1);
+        LocalDate wed = next.plusDays(2);
+        // Ben takes Wednesday: the store can spare only one person that day, so it's taken for Anna.
+        as(ben);
+        dayOffService.create(new CreateDayOffRequest(ben, List.of(wed), null, null));
+        as(anna);
+        assertThrows(BusinessRuleException.class,
+                () -> dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null)), "taken for a normal request");
+        // Her week still has open days, but Wednesday itself is taken: an emergency for it goes to a manager.
+        var urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), "Wedding", true)).getFirst();
+        assertTrue(urgent.emergency());
+        assertEquals(DayOffStatus.PENDING, urgent.status());
+    }
+
+    @Test
+    void aTurnedDownRequestCanBeAskedForAgain() {
+        LocalDate next = DayOffService.weekStart(today).plusWeeks(1);
+        LocalDate tue = next.plusDays(1);
+        LocalDate thu = next.plusDays(3);
+        as(anna);
+        dayOffService.create(new CreateDayOffRequest(anna, List.of(tue), null, null)); // her normal day: the week is full
+        Long urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(thu), "Sick", true)).getFirst().id();
+        TestUsers.signInAsAdmin();
+        dayOffService.reject(urgent, "Busy");
+
+        // She can ask again, for the same day: the rejected request is replaced, and it didn't use up her month.
+        as(anna);
+        var again = dayOffService.create(new CreateDayOffRequest(anna, List.of(thu), "Still sick", true)).getFirst();
+        assertEquals(DayOffStatus.PENDING, again.status());
+        assertTrue(again.emergency());
+
+        // A rejected normal day can be asked for again too (by a manager entering it, here).
+        TestUsers.signInAsAdmin();
+        dayOffService.reject(again.id(), "Still busy");
+        assertEquals(1, dayOffService.create(new CreateDayOffRequest(anna, List.of(thu), null, null, true)).size());
     }
 
     @Test

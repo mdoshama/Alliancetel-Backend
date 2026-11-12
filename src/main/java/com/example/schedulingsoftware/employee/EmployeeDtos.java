@@ -47,7 +47,17 @@ public final class EmployeeDtos {
              * Text-message updates. Only an admin can turn them on for someone, confirming the person agreed (needs a
              * phone number); admins and managers can turn them off. Null keeps the current setting.
              */
-            Boolean smsOptIn) {
+            Boolean smsOptIn,
+            /** In training (employees only): shown as "Trainee". Null keeps the current setting (new: false). */
+            Boolean trainee) {
+
+        public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
+                Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
+                Boolean whatsappOptIn, Boolean emailOptIn, java.time.LocalDate birthDate,
+                java.util.List<Long> floatStoreIds, Boolean onSchedule, Boolean smsOptIn) {
+            this(employeeCode, firstName, lastName, email, phone, role, areaId, homeStoreId, workDaysPerWeek, active,
+                    primaryAtStore, whatsappOptIn, emailOptIn, birthDate, floatStoreIds, onSchedule, smsOptIn, null);
+        }
 
         public EmployeeRequest(String employeeCode, String firstName, String lastName, String email, String phone,
                 Role role, Long areaId, Long homeStoreId, Integer workDaysPerWeek, Boolean active, Boolean primaryAtStore,
@@ -129,7 +139,9 @@ public final class EmployeeDtos {
             /** The admin who recorded their agreement to texts (null if they turned texts on themselves). */
             String smsConsentBy,
             /** Days of the week they're normally off, Monday first. */
-            java.util.List<java.time.DayOfWeek> regularDaysOff) {
+            java.util.List<java.time.DayOfWeek> regularDaysOff,
+            /** In training (shown as "Trainee"). */
+            boolean trainee) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -162,11 +174,16 @@ public final class EmployeeDtos {
                             .toList(),
                     e.isOnSchedule(),
                     e.isSmsOptIn() ? e.getSmsConsentBy() : null,
-                    e.getRegularDaysOff().stream().sorted().toList());
+                    e.getRegularDaysOff().stream().sorted().toList(),
+                    e.isTrainee());
         }
     }
 
     /** Days of the week someone is normally off (empty clears them). */
+    /** How many days a week someone works (1 to 7). */
+    public record WorkDaysRequest(@jakarta.validation.constraints.NotNull @Min(1) @Max(7) Integer days) {
+    }
+
     public record RegularDaysOffRequest(@jakarta.validation.constraints.NotNull java.util.List<java.time.DayOfWeek> days) {
     }
 

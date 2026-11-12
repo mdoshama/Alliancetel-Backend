@@ -99,6 +99,18 @@ public class EmployeeController {
         return employeeService.findById(id);
     }
 
+    /**
+     * Sets how many days a week someone works (managers of their area, admins). Days the system holds for them in
+     * weeks still open are planned again for the new number.
+     */
+    @PutMapping("/{id}/work-days")
+    public EmployeeResponse setWorkDays(@PathVariable Long id,
+            @Valid @RequestBody EmployeeDtos.WorkDaysRequest request) {
+        employeeService.setWorkDaysPerWeek(id, request.days());
+        reservations.replanFor(employeeService.getEmployee(id));
+        return employeeService.findById(id);
+    }
+
     @PostMapping("/{id}/reset-password")
     public CredentialsResponse resetPassword(@PathVariable Long id,
             @RequestParam(defaultValue = "false") boolean textLink) {

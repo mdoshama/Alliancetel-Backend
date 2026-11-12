@@ -586,28 +586,18 @@ public class ScheduleService {
      */
     @Transactional(readOnly = true)
     /**
-     * The order of the rows: store by store (by name), and at each store its primary first, then its secondary, then
-     * anyone else based there; floaters (no home store) after all the stores. Same order for everyone, whatever they
-     * can see.
+     * The order of the rows: managers first, then employees, then trainees; A to Z by name within each. Same order
+     * for everyone, whatever they can see.
      */
     private static Comparator<EmployeeRow> rowOrder(Map<Long, List<ScheduleEntry>> byEmployee) {
-        Map<Long, Employee> people = new HashMap<>();
-        byEmployee.values().forEach(list -> {
-            Employee e = list.getFirst().getEmployee();
-            people.put(e.getId(), e);
-        });
-        Comparator<Employee> order = Comparator
-                .comparing((Employee e) -> e.getHomeStore() == null ? 1 : 0)
-                .thenComparing(e -> e.getHomeStore() == null ? "" : e.getHomeStore().getName(),
-                        String.CASE_INSENSITIVE_ORDER)
-                .thenComparing(e -> e.getHomeStore() == null ? 0L : e.getHomeStore().getId())
-                .thenComparing(e -> e.getStoreRole() == null ? 2 : switch (e.getStoreRole()) {
-                    case PRIMARY -> 0;
-                    case SECONDARY -> 1;
-                    case FLOATER -> 2;
-                })
-                .thenComparing(Employee::getFullName, String.CASE_INSENSITIVE_ORDER);
-        return (a, b) -> order.compare(people.get(a.employeeId()), people.get(b.employeeId()));
+        return Comparator.comparingInt(ScheduleService::rowGroup)
+                .thenComparing(EmployeeRow::employeeName, String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(EmployeeRow::employeeId);
+    }
+
+    /** 0 = managers, 1 = employees, 2 = trainees. */
+    static int rowGroup(EmployeeRow r) {
+        return r.role() == Role.MANAGER ? 0 : r.trainee() ? 2 : 1;
     }
 
     /** Where an approved day off came from, for the label managers and admins see on the schedule. */
@@ -1231,7 +1221,7 @@ public class ScheduleService {
                             home == null ? null : home.getId(), home == null ? null : home.getName(),
                             hideStoreRoles ? null : e.getStoreRole(),
                             fullWeek.contains(e.getId()) ? 7 : e.getWorkDaysPerWeek(), working, cells,
-                            hideStoreRoles ? List.of() : List.copyOf(e.floatStoreIds()));
+                            hideStoreRoles ? List.of() : List.copyOf(e.floatStoreIds()), e.isTrainee());
                 })
                 .sorted(rowOrder(byEmployee))
                 .toList();

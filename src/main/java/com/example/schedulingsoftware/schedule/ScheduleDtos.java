@@ -122,7 +122,16 @@ public final class ScheduleDtos {
             int scheduledWorkDays,
             List<DayCell> days,
             /** Stores they may float to (empty = any); managers only. */
-            List<Long> floatStoreIds) {
+            List<Long> floatStoreIds,
+            /** In training (shown as "Trainee", listed last). */
+            boolean trainee) {
+
+        public EmployeeRow(Long employeeId, String employeeCode, String employeeName, Role role, Long homeStoreId,
+                String homeStoreName, com.example.schedulingsoftware.employee.StoreRole storeRole, int expectedWorkDays,
+                int scheduledWorkDays, List<DayCell> days, List<Long> floatStoreIds) {
+            this(employeeId, employeeCode, employeeName, role, homeStoreId, homeStoreName, storeRole, expectedWorkDays,
+                    scheduledWorkDays, days, floatStoreIds, false);
+        }
     }
 
     /** How approving a day off would affect staffing. */

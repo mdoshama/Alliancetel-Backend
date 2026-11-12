@@ -79,6 +79,7 @@ public class SecurityConfig {
                         // Managers rotate their own staff between stores.
                         .requestMatchers(HttpMethod.PATCH, "/api/employees/*/home-store").hasAnyRole(ADMIN, MANAGER)
                         .requestMatchers(HttpMethod.PUT, "/api/employees/*/regular-days-off").hasAnyRole(ADMIN, MANAGER)
+                        .requestMatchers(HttpMethod.PUT, "/api/employees/*/work-days").hasAnyRole(ADMIN, MANAGER)
                         .requestMatchers("/api/employees/**").hasRole(ADMIN)
 
                         // Everyone can request days off; only managers and admins decide on them.

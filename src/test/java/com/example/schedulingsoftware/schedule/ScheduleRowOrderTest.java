@@ -62,7 +62,7 @@ class ScheduleRowOrderTest {
     }
 
     @Test
-    void rowsGoStoreByStorePrimaryThenSecondaryThenFloaters() {
+    void managersFirstThenEmployeesThenTraineesEachAToZ() {
         Long bravo = storeService.create(new StoreRequest(area, "Bravo", "BRV", null, 1, true, null, null)).id();
         Long alpha = storeService.create(new StoreRequest(area, "Alpha", "ALP", null, 1, true, null, null)).id();
         person("OR-1", "Aaron", alpha, false);
@@ -70,12 +70,17 @@ class ScheduleRowOrderTest {
         person("OR-3", "Bea", bravo, true);
         person("OR-4", "Abe", bravo, false);
         person("OR-5", "Cal", null, null);
+        employeeService.create(new EmployeeRequest("OR-6", "Yara", "Order", "or-6@test.example", null, Role.MANAGER,
+                area, alpha, 6, true, null));
+        employeeService.create(new EmployeeRequest("OR-7", "Adam", "Order", "or-7@test.example", null, Role.EMPLOYEE,
+                area, bravo, 6, true, null, null, null, null, null, null, null, true));
 
         ScheduleResponse s = scheduleService.generate(area, monday, true);
 
-        assertEquals(List.of("Zoe Order", "Aaron Order", "Bea Order", "Abe Order", "Cal Order"),
+        assertEquals(List.of("Yara Order", "Aaron Order", "Abe Order", "Bea Order", "Cal Order", "Zoe Order", "Adam Order"),
                 s.rows().stream().map(EmployeeRow::employeeName).toList(),
-                "Alpha: primary, secondary; Bravo: primary, secondary; then the floater");
+                "the manager, then employees A to Z, then the trainee");
+        assertTrue(s.rows().getLast().trainee());
     }
 
     @Test

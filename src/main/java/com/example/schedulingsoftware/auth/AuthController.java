@@ -55,15 +55,28 @@ public class AuthController {
         return authService.me();
     }
 
-    /** Anyone can turn their own WhatsApp schedule updates on (if they have a phone number on file) or off. */
+    /**
+     * How someone gets schedule updates is decided by an admin (on the Employees page), not by managers or employees
+     * themselves. Admins can still change their own here.
+     */
+    private void requireAdmin() {
+        if (authService.me().role() != com.example.schedulingsoftware.employee.Role.ADMIN) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "How you get schedule updates is set by an admin.");
+        }
+    }
+
+    /** Admins: turn their own WhatsApp schedule updates on (with a phone number on file) or off. */
     @PutMapping("/me/whatsapp")
     public Me whatsapp(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {
+        requireAdmin();
         return authService.setWhatsapp(body.optIn());
     }
 
-    /** Anyone can turn their own text-message updates on (if they have a phone number on file) or off. */
+    /** Admins: turn their own text-message updates on (with a phone number on file) or off. */
     @PutMapping("/me/sms")
     public Me sms(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {
+        requireAdmin();
         boolean wasOn = authService.me().smsOptIn();
         Me me = authService.setSms(body.optIn());
         if (me.smsOptIn() && !wasOn) {
@@ -72,9 +85,10 @@ public class AuthController {
         return me;
     }
 
-    /** Anyone can turn their own email schedule updates off or back on. */
+    /** Admins: turn their own email schedule updates off or back on. */
     @PutMapping("/me/email")
     public Me email(@Valid @RequestBody AuthDtos.WhatsAppPreference body) {
+        requireAdmin();
         return authService.setEmailUpdates(body.optIn());
     }
 

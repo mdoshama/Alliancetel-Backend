@@ -111,6 +111,14 @@ public class Employee {
     @ColumnDefault("true")
     private boolean onSchedule = true;
 
+    /**
+     * In training: shown as "Trainee" and listed after everyone else on the schedule. Otherwise works like an employee
+     * (shifts, day-off requests). Only for the EMPLOYEE role.
+     */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    private boolean trainee;
+
     /** Agreed to get schedule updates on WhatsApp (needed before any message is sent). */
     @Column(nullable = false)
     @ColumnDefault("false")

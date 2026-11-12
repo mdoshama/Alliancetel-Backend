@@ -66,7 +66,8 @@ public class EmployeeService {
     }
 
     private static Sort sortBy(String sort) {
-        Sort byName = Sort.by("lastName", "firstName", "id");
+        // A to Z by the name as shown ("First Last").
+        Sort byName = Sort.by("firstName", "lastName", "id");
         if ("code".equalsIgnoreCase(sort)) {
             return Sort.by("employeeCode", "id");
         }
@@ -233,6 +234,33 @@ public class EmployeeService {
         employeeRepository.flush();
     }
 
+    /**
+     * Sets how many days a week someone works (admins, and managers for the people in their area). Regular days off
+     * beyond what the new number allows are dropped, latest in the week first.
+     */
+    @Transactional
+    public void setWorkDaysPerWeek(Long id, int days) {
+        Employee employee = getEmployee(id);
+        accessPolicy.requireManagerOf(employee.getArea() == null ? null : employee.getArea().getId());
+        var by = accessPolicy.current();
+        if (!by.isAdmin() && (employee.getId().equals(by.id()) || employee.getRole() == Role.ADMIN)) {
+            throw new BusinessRuleException("Only an admin can change this for "
+                    + (employee.getId().equals(by.id()) ? "you." : "an admin."));
+        }
+        if (days < 1 || days > 7) {
+            throw new BusinessRuleException("Days a week must be between 1 and 7.");
+        }
+        int usual = 7 - days;
+        java.util.List<java.time.DayOfWeek> regular = new java.util.ArrayList<>(
+                new java.util.TreeSet<>(employee.getRegularDaysOff()));
+        if (regular.size() > usual) {
+            employee.getRegularDaysOff().removeAll(regular.subList(usual, regular.size()));
+        }
+        employee.setWorkDaysPerWeek(days);
+        employeeRepository.flush();
+        log.info("{} now works {} days a week (set by {})", employee.getEmail(), days, by.email());
+    }
+
     @Transactional
     public EmployeeResponse changeHomeStore(Long id, Long storeId) {
         return changeHomeStore(id, storeId, null);
@@ -370,6 +398,12 @@ public class EmployeeService {
             employee.setOnSchedule(true);
         } else if (request.onSchedule() != null) {
             employee.setOnSchedule(request.onSchedule());
+        }
+        // Only employees can be trainees.
+        if (request.role() != Role.EMPLOYEE) {
+            employee.setTrainee(false);
+        } else if (request.trainee() != null) {
+            employee.setTrainee(request.trainee());
         }
         if (wasOnSchedule && !employee.isOnSchedule() && employee.getId() != null) {
             // Their days the system reserved from today on are no longer needed.

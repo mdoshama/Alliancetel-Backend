@@ -125,6 +125,28 @@ class AccessRulesIntegrationTest {
     }
 
     @Test
+    void managerSetsHowManyDaysTheirTeamWorks() {
+        TestUsers.signInAs(sdManager, Role.MANAGER, sanDiego);
+        // 5 days: room for two regular days off.
+        employeeService.setWorkDaysPerWeek(sdEmployee, 5);
+        assertEquals(5, employeeService.findById(sdEmployee).workDaysPerWeek());
+        employeeService.setRegularDaysOff(sdEmployee, List.of(java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.FRIDAY));
+        // Back to 6 days: only one regular day off fits, so the later one goes.
+        employeeService.setWorkDaysPerWeek(sdEmployee, 6);
+        var after = employeeService.findById(sdEmployee);
+        assertEquals(6, after.workDaysPerWeek());
+        assertEquals(List.of(java.time.DayOfWeek.MONDAY), List.copyOf(after.regularDaysOff()));
+
+        assertThrows(AccessDeniedException.class, () -> employeeService.setWorkDaysPerWeek(laEmployee, 5),
+                "not their area");
+        assertThrows(BusinessRuleException.class, () -> employeeService.setWorkDaysPerWeek(sdManager, 5),
+                "not for themselves");
+        assertThrows(BusinessRuleException.class, () -> employeeService.setWorkDaysPerWeek(sdEmployee, 8));
+        TestUsers.signInAs(sdEmployee, Role.EMPLOYEE, sanDiego);
+        assertThrows(AccessDeniedException.class, () -> employeeService.setWorkDaysPerWeek(sdEmployee, 5));
+    }
+
+    @Test
     void weakPasswordsAreRejected() {
         assertThrows(BusinessRuleException.class, () -> PasswordPolicy.validate("short1"));
         assertThrows(BusinessRuleException.class, () -> PasswordPolicy.validate("allletters"));

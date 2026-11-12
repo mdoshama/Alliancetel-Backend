@@ -4,7 +4,6 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -66,20 +65,15 @@ public class RequestPortal {
         return openWeeks(mode(), today());
     }
 
+    /**
+     * The weeks taking requests: by default (and when opened) the next two weeks; the current week never (its
+     * schedule is already made). Empty when closed.
+     */
     static List<LocalDate> openWeeks(PortalMode mode, LocalDate today) {
-        LocalDate auto = openWeek(today);
+        LocalDate next = DayOffService.weekStart(today).plusWeeks(1);
         return switch (mode) {
-            case AUTO -> List.of(auto);
+            case AUTO, OPEN -> List.of(next, next.plusWeeks(1));
             case CLOSED -> List.of();
-            case OPEN -> {
-                List<LocalDate> weeks = new ArrayList<>();
-                LocalDate next = DayOffService.weekStart(today).plusWeeks(1);
-                weeks.add(next);
-                if (!auto.equals(next)) {
-                    weeks.add(auto);
-                }
-                yield weeks;
-            }
         };
     }
 
@@ -88,11 +82,9 @@ public class RequestPortal {
         return openWeeks().contains(weekStart);
     }
 
-    /** Weeks that get reserved days off: next week and the week taking requests (whatever the portal's mode). */
+    /** Weeks that get reserved days off: the next two weeks (whatever the portal's mode). */
     public List<LocalDate> reservableWeeks() {
-        LocalDate today = today();
-        LocalDate next = DayOffService.weekStart(today).plusWeeks(1);
-        LocalDate auto = openWeek(today);
-        return next.equals(auto) ? List.of(next) : List.of(next, auto);
+        LocalDate next = DayOffService.weekStart(today()).plusWeeks(1);
+        return List.of(next, next.plusWeeks(1));
     }
 }
