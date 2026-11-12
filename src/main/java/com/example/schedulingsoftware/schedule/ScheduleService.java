@@ -78,6 +78,7 @@ public class ScheduleService {
     private final WeekRequests weekRequests;
     private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
     private final FullWeekRepository fullWeeks;
+    private final PastWeekLock pastWeekLock;
 
     /** Generating waits until everyone has sent their day-off request for the week (or been given a day off). */
     @org.springframework.beans.factory.annotation.Value("${alliancetel.scheduling.require-requests-before-generate:true}")
@@ -135,6 +136,7 @@ public class ScheduleService {
     public ScheduleResponse generate(Long areaId, LocalDate anyDayInWeek, boolean force) {
         LocalDate weekStart = DayOffService.weekStart(anyDayInWeek);
         accessPolicy.requireManagerOf(areaId);
+        pastWeekLock.requireOpen(areaId, weekStart);
         LocalDate today = LocalDate.now();
         if (weekStart.isAfter(today.plusYears(1)) || weekStart.isBefore(today.minusYears(1))) {
             throw new BusinessRuleException("Schedules can be made for weeks up to a year ahead or back.");
@@ -500,6 +502,7 @@ public class ScheduleService {
         if (found.isEmpty()) {
             return null;
         }
+        pastWeekLock.requireOpen(employee.getArea().getId(), date);
         WeeklySchedule schedule = found.get();
         Change change = applyDayOff(schedule, employee.getId(), date);
         if (!change.changed()) {
@@ -544,6 +547,7 @@ public class ScheduleService {
         if (found.isEmpty()) {
             return null;
         }
+        pastWeekLock.requireOpen(employee.getArea().getId(), date);
         WeeklySchedule schedule = found.get();
         ScheduleEntry target = schedule.getEntries().stream()
                 .filter(e -> e.getEmployee().getId().equals(employee.getId()))
@@ -1027,6 +1031,8 @@ public class ScheduleService {
         WeeklySchedule schedule = scheduleRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Schedule", id));
         accessPolicy.requireManagerOf(schedule.getArea().getId());
+        // A week that has passed is locked for managers until an admin opens it.
+        pastWeekLock.requireOpen(schedule.getArea().getId(), schedule.getWeekStart());
         return schedule;
     }
 

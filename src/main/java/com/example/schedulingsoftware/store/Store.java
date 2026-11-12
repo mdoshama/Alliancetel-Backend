@@ -83,14 +83,6 @@ public class Store {
     @Column(length = 7)
     private String color;
 
-    /**
-     * Sales tax at this store, in percent (e.g. 7.75). Added to a device's retail price on a sale, and taken off
-     * accessories before commission. Set by admins; 0 until set.
-     */
-    @Column(nullable = false, precision = 6, scale = 3)
-    @ColumnDefault("0")
-    private java.math.BigDecimal taxRate = java.math.BigDecimal.ZERO;
-
     /** Opening hours per day of the week. A day with no entry uses the default 10:00–20:00. */
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "store_hours", joinColumns = @JoinColumn(name = "store_id"),

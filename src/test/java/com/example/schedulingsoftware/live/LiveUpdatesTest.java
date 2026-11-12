@@ -106,7 +106,7 @@ class LiveUpdatesTest {
         assertEquals("dayoff", LiveChangeInterceptor.topicOf("/api/day-off-requests/approve-many"));
         assertEquals("people", LiveChangeInterceptor.topicOf("/api/employees/9/home-store"));
         assertEquals("timeclock", LiveChangeInterceptor.topicOf("/api/time-clock/in"));
-        assertEquals("eod", LiveChangeInterceptor.topicOf("/api/eod/12/approve"));
+        assertNull(LiveChangeInterceptor.topicOf("/api/eod/12/approve"), "retired");
         assertNull(LiveChangeInterceptor.topicOf("/api/auth/login"));
         assertTrue(LiveChangeInterceptor.changes("PATCH"));
         assertFalse(LiveChangeInterceptor.changes("GET"));

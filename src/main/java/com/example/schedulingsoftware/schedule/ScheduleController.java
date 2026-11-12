@@ -38,6 +38,7 @@ public class ScheduleController {
     private final com.example.schedulingsoftware.employee.EmployeeService employeeService;
     private final com.example.schedulingsoftware.dayoff.DayOffReservations reservations;
     private final com.example.schedulingsoftware.auth.AccessPolicy accessPolicy;
+    private final PastWeekLock pastWeekLock;
 
     private Long employeeArea(Long employeeId) {
         var area = employeeService.getEmployee(employeeId).getArea();
@@ -61,6 +62,7 @@ public class ScheduleController {
     /** Managers and admins: someone works all 7 days of that week (on), or back to their usual days (off). */
     @PostMapping("/requests/full-week")
     public WeekRequests.Status fullWeek(@Valid @RequestBody FullWeekRequest request) {
+        pastWeekLock.requireOpen(employeeArea(request.employeeId()), request.weekStart());
         fullWeekService.set(request.employeeId(), request.weekStart(), Boolean.TRUE.equals(request.on()));
         Long areaId = employeeArea(request.employeeId());
         return weekRequests.status(areaId, request.weekStart());
@@ -85,6 +87,47 @@ public class ScheduleController {
         return scheduleService.find(areaId, weekStart)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /** Whether a week that has passed is locked for you, and the latest request to open it. */
+    @GetMapping("/past-week-access")
+    public PastWeekLock.WeekStatus pastWeekStatus(@RequestParam Long areaId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return pastWeekLock.status(areaId, weekStart);
+    }
+
+    /** Managers: ask an admin to open a week that has passed. */
+    @PostMapping("/past-week-access")
+    public PastWeekLock.AccessView askPastWeekAccess(@Valid @RequestBody PastWeekAccessRequest request) {
+        return pastWeekLock.request(request.areaId(), request.weekStart(), request.reason());
+    }
+
+    public record PastWeekAccessRequest(@jakarta.validation.constraints.NotNull Long areaId,
+            @jakarta.validation.constraints.NotNull LocalDate weekStart,
+            @jakarta.validation.constraints.Size(max = 500) String reason) {
+    }
+
+    /** Admins: requests to open past weeks that are waiting. */
+    @GetMapping("/past-week-access/pending")
+    public List<PastWeekLock.AccessView> pendingPastWeekAccess() {
+        return pastWeekLock.pending();
+    }
+
+    /** Admins: open the week (for "hours", 24 by default) or turn the request down. */
+    @PostMapping("/past-week-access/{id}/decide")
+    public PastWeekLock.AccessView decidePastWeekAccess(@PathVariable Long id,
+            @RequestBody PastWeekDecision decision) {
+        return pastWeekLock.decide(id, Boolean.TRUE.equals(decision.approve()), decision.hours(), decision.note());
+    }
+
+    public record PastWeekDecision(Boolean approve, Integer hours,
+            @jakarta.validation.constraints.Size(max = 500) String note) {
+    }
+
+    /** Admins: lock an opened week again. */
+    @PostMapping("/past-week-access/{id}/lock")
+    public PastWeekLock.AccessView lockPastWeek(@PathVariable Long id) {
+        return pastWeekLock.lockAgain(id);
     }
 
     @PostMapping("/generate")

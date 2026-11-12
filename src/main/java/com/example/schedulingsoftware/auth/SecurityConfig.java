@@ -90,22 +90,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/notifications", "/api/notifications/**").hasRole(ADMIN)
                         .requestMatchers("/api/notifications/**").hasAnyRole(ADMIN, MANAGER)
 
-                        // Device list for logging sales: everyone reads it, admins keep it.
-                        .requestMatchers(HttpMethod.GET, "/api/catalog/**").authenticated()
-                        .requestMatchers("/api/catalog/**").hasRole(ADMIN)
-
-                        // Commission is for admins only.
-                        .requestMatchers("/api/commission/**").hasRole(ADMIN)
-
-                        // Performance: everyone sees their own; managers and admins see the leaderboard.
-                        .requestMatchers("/api/performance/leaderboard").hasAnyRole(ADMIN, MANAGER)
-                        .requestMatchers("/api/performance/**").authenticated()
-
-                        // End of day: reps log their own sales and close out; managers review, approve and reopen.
-                        .requestMatchers("/api/eod/*/approve", "/api/eod/*/reopen", "/api/eod/day", "/api/eod/month")
-                                .hasAnyRole(ADMIN, MANAGER)
-                        .requestMatchers("/api/eod/**").authenticated()
-
                         // Time clock: back office (and admins) clock people in and out; managers look at their area.
                         .requestMatchers("/api/time-clock/**").hasAnyRole(ADMIN, MANAGER, BACK_OFFICE)
 

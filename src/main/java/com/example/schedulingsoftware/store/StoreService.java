@@ -68,9 +68,6 @@ public class StoreService {
             store.replaceHours(toHours(request.hours()));
         }
         store.setColor(request.color() != null ? normalizeColor(request.color()) : unusedColor(area.getId()));
-        if (request.taxRate() != null) {
-            store.setTaxRate(request.taxRate());
-        }
         return StoreResponse.from(storeRepository.save(store), 0);
     }
 
@@ -105,9 +102,6 @@ public class StoreService {
         }
         if (request.color() != null) {
             store.setColor(normalizeColor(request.color()));
-        }
-        if (request.taxRate() != null) {
-            store.setTaxRate(request.taxRate());
         }
         return StoreResponse.from(store, staff);
     }

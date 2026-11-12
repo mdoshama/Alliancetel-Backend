@@ -85,7 +85,7 @@ class CapacityAndOverridesTest {
         area = areaService.create(new AreaRequest("Capacity Area", null, true)).id();
         north = storeService.create(new StoreRequest(area, "North", "CN", null, 2, true, null, null)).id();
         // South takes at most one floater a day.
-        south = storeService.create(new StoreRequest(area, "South", "CS", null, 2, true, null, null, null, 1)).id();
+        south = storeService.create(new StoreRequest(area, "South", "CS", null, 2, true, null, null, 1)).id();
         n1 = employee("CP-1", "Nia", north, true, List.of());
         n2 = employee("CP-2", "Ned", north, false, List.of());
         s1 = employee("CP-3", "Sal", south, true, List.of());
