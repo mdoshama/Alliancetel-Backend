@@ -30,18 +30,31 @@ public class StoreDayHours {
     @Column(nullable = false)
     private boolean closed;
 
-    private StoreDayHours(DayOfWeek dayOfWeek, LocalTime opensAt, LocalTime closesAt, boolean closed) {
+    /**
+     * Fewest people needed on this weekday, when it differs from the store's usual minimum (e.g. 3 all week but 2 on
+     * Sunday). Null uses the store's minimum.
+     */
+    @Column(name = "min_staff")
+    private Integer minStaff;
+
+    private StoreDayHours(DayOfWeek dayOfWeek, LocalTime opensAt, LocalTime closesAt, boolean closed, Integer minStaff) {
         this.dayOfWeek = dayOfWeek;
         this.opensAt = closed ? null : opensAt;
         this.closesAt = closed ? null : closesAt;
         this.closed = closed;
+        this.minStaff = closed ? null : minStaff;
     }
 
     public static StoreDayHours open(DayOfWeek day, LocalTime opensAt, LocalTime closesAt) {
-        return new StoreDayHours(day, opensAt, closesAt, false);
+        return new StoreDayHours(day, opensAt, closesAt, false, null);
+    }
+
+    /** Open, with its own minimum staff for the day (null = the store's usual minimum). */
+    public static StoreDayHours open(DayOfWeek day, LocalTime opensAt, LocalTime closesAt, Integer minStaff) {
+        return new StoreDayHours(day, opensAt, closesAt, false, minStaff);
     }
 
     public static StoreDayHours closedOn(DayOfWeek day) {
-        return new StoreDayHours(day, null, null, true);
+        return new StoreDayHours(day, null, null, true, null);
     }
 }

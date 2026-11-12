@@ -768,7 +768,7 @@ public class ScheduleService {
                 })
                 .toList();
         boolean alreadyShortThatDay = will.gaps().stream().anyMatch(g -> g.date().equals(date));
-        int needed = stores.stream().filter(s -> s.isOpenOn(date)).mapToInt(Store::getMinStaffPerDay).sum();
+        int needed = stores.stream().mapToInt(s -> s.minStaffOn(date)).sum();
         int workingBefore = was.working().getOrDefault(date, 0);
         int workingAfter = will.working().getOrDefault(date, 0);
 
@@ -976,7 +976,7 @@ public class ScheduleService {
         List<StoreAssigner.StoreSlot> storeSlots = stores.stream()
                 .map(s -> new StoreAssigner.StoreSlot(s.getId(), s.getMinStaffPerDay(),
                         dates.stream().filter(d -> !s.isOpenOn(d)).collect(Collectors.toSet()),
-                        s.getMaxFloatersPerDay()))
+                        s.getMaxFloatersPerDay(), dailyMinimums(s, dates)))
                 .toList();
         List<StoreAssigner.WorkSlot> slots = new ArrayList<>();
         Map<LocalDate, Integer> working = new HashMap<>();
@@ -1008,12 +1008,23 @@ public class ScheduleService {
         for (LocalDate d : dates) {
             for (Store s : stores) {
                 int n = count.getOrDefault(s.getId() + "|" + d, 0);
-                if (s.isOpenOn(d) && n < s.getMinStaffPerDay()) {
-                    gaps.add(new Shortage(s.getName(), d, n, s.getMinStaffPerDay()));
+                if (s.isOpenOn(d) && n < s.minStaffOn(d)) {
+                    gaps.add(new Shortage(s.getName(), d, n, s.minStaffOn(d)));
                 }
             }
         }
         return new Eval(working, gaps);
+    }
+
+    /** The dates on which the store's minimum differs from its usual one (a day-specific minimum). */
+    private static Map<LocalDate, Integer> dailyMinimums(Store store, List<LocalDate> dates) {
+        Map<LocalDate, Integer> result = new HashMap<>();
+        for (LocalDate d : dates) {
+            if (store.isOpenOn(d) && store.minStaffOn(d) != store.getMinStaffPerDay()) {
+                result.put(d, store.minStaffOn(d));
+            }
+        }
+        return result;
     }
 
     private static String dayName(LocalDate date) {
@@ -1036,7 +1047,7 @@ public class ScheduleService {
                 .filter(Store::isActive)
                 .map(s -> new StoreAssigner.StoreSlot(s.getId(), s.getMinStaffPerDay(),
                         weekDates(schedule).stream().filter(d -> !s.isOpenOn(d)).collect(Collectors.toSet()),
-                        s.getMaxFloatersPerDay()))
+                        s.getMaxFloatersPerDay(), dailyMinimums(s, weekDates(schedule))))
                 .toList();
         Map<Long, Store> storesById = new HashMap<>();
         areaStores.forEach(s -> storesById.put(s.getId(), s));
@@ -1239,9 +1250,11 @@ public class ScheduleService {
         for (int day = 0; day < 7; day++) {
             for (StoreCoverage c : coverage) {
                 int scheduled = c.dailyHeadCount().get(day);
-                boolean closed = c.dailyHours().get(day).closed();
-                if (c.storeId() != null && !closed && scheduled < c.minStaffPerDay()) {
-                    gaps.add(new CoverageGap(c.storeId(), c.storeName(), dates.get(day), scheduled, c.minStaffPerDay()));
+                DayHours hours = c.dailyHours().get(day);
+                // The day's own minimum when the store has one (e.g. fewer on Sunday), otherwise its usual one.
+                int min = hours.minStaff() != null ? hours.minStaff() : c.minStaffPerDay();
+                if (c.storeId() != null && !hours.closed() && scheduled < min) {
+                    gaps.add(new CoverageGap(c.storeId(), c.storeName(), dates.get(day), scheduled, min));
                 }
             }
         }
@@ -1289,7 +1302,9 @@ public class ScheduleService {
             if (store.isActive() || c != null) {
                 // Inactive stores still listed (because someone is scheduled there) have no minimum to meet.
                 int min = store.isActive() ? store.getMinStaffPerDay() : 0;
-                List<DayHours> daily = dates.stream().map(d -> DayHours.from(store.hoursOn(d.getDayOfWeek()))).toList();
+                List<DayHours> daily = dates.stream().map(d -> DayHours.from(store.hoursOn(d.getDayOfWeek())))
+                        .map(h -> store.isActive() ? h : new DayHours(h.day(), h.opensAt(), h.closesAt(), h.closed()))
+                        .toList();
                 result.add(new StoreCoverage(store.getId(), store.getName(), store.getLabel(), min, toList(c), daily,
                         store.getDisplayColor()));
             }

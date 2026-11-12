@@ -45,7 +45,9 @@ public final class AuthDtos {
             /** Days they work in a normal week (7 minus their usual days off). */
             int workDaysPerWeek,
             /** Their regular days off, the same every week (a day they ask for replaces it that week). */
-            java.util.List<java.time.DayOfWeek> regularDaysOff) {
+            java.util.List<java.time.DayOfWeek> regularDaysOff,
+            /** On the weekly schedule (false for managers who only manage), so they have days off to ask for. */
+            boolean worksShifts) {
 
         public static Me from(Employee e) {
             // Employees aren't told their home store: primary / secondary / floater is for admins and managers.
@@ -62,7 +64,8 @@ public final class AuthDtos {
                     e.isSmsOptIn(),
                     e.getBirthDate(),
                     e.getWorkDaysPerWeek(),
-                    e.getRegularDaysOff().stream().sorted().toList());
+                    e.getRegularDaysOff().stream().sorted().toList(),
+                    e.worksShifts());
         }
     }
 

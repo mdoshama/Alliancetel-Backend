@@ -91,6 +91,12 @@ public class DayOffController {
         return dayOffService.setPortal(body.mode());
     }
 
+    /** Managers (their area) and admins: let employees ask further ahead, up to a date; null = the usual window. */
+    @PutMapping("/open-until")
+    public DayOffDtos.OpenUntilResponse openUntil(@Valid @RequestBody DayOffDtos.OpenUntilRequest body) {
+        return dayOffService.setOpenUntil(body.areaId(), body.until());
+    }
+
     @GetMapping("/taken-days")
     public List<TakenDay> takenDays(@RequestParam Long employeeId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,

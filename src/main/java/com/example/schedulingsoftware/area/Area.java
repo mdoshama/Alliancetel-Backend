@@ -36,6 +36,20 @@ public class Area {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
+    /**
+     * Employees here may ask for days off up to this date (a manager or admin opened requests further ahead than
+     * usual). Null: the usual window (the week taking requests, at most two weeks ahead).
+     */
+    @Column(name = "requests_open_until")
+    private java.time.LocalDate requestsOpenUntil;
+
+    /** Who opened requests further ahead, and when. */
+    @Column(name = "requests_opened_by", length = 120)
+    private String requestsOpenedBy;
+
+    @Column(name = "requests_opened_at")
+    private Instant requestsOpenedAt;
+
     public Area(String name, String description) {
         this.name = name;
         this.description = description;

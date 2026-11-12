@@ -161,7 +161,10 @@ public class StoreService {
             if (!d.closesAt().isAfter(d.opensAt())) {
                 throw new BusinessRuleException("On " + dayName + " the closing time must be after the opening time.");
             }
-            result.add(StoreDayHours.open(d.day(), d.opensAt(), d.closesAt()));
+            if (d.minStaff() != null && (d.minStaff() < 0 || d.minStaff() > 50)) {
+                throw new BusinessRuleException("The minimum staff on " + dayName + " must be between 0 and 50.");
+            }
+            result.add(StoreDayHours.open(d.day(), d.opensAt(), d.closesAt(), d.minStaff()));
         }
         return result;
     }

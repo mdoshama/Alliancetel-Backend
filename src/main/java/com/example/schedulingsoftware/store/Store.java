@@ -135,6 +135,18 @@ public class Store {
         return !hoursOn(date.getDayOfWeek()).isClosed();
     }
 
+    /**
+     * Fewest people needed on that date: the day's own minimum when one is set (e.g. 2 on Sunday), otherwise the
+     * store's usual minimum. 0 when the store is closed.
+     */
+    public int minStaffOn(java.time.LocalDate date) {
+        StoreDayHours h = hoursOn(date.getDayOfWeek());
+        if (h.isClosed()) {
+            return 0;
+        }
+        return Math.max(0, h.getMinStaff() != null ? h.getMinStaff() : minStaffPerDay);
+    }
+
     /** Replaces all opening hours (one entry per weekday). */
     public void replaceHours(List<StoreDayHours> newHours) {
         hours.clear();

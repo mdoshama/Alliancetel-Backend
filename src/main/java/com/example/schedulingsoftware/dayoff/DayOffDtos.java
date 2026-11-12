@@ -53,7 +53,19 @@ public final class DayOffDtos {
             /** AUTO (Friday cycle), OPEN or CLOSED by an admin, who changed it last and when. */
             PortalMode mode, List<LocalDate> openWeeks, String changedBy, java.time.Instant changedAt,
             /** Days off are reserved for everyone when a week opens. */
-            boolean reservations) {
+            boolean reservations,
+            /**
+             * The signed-in person's area takes requests up to this date (a manager opened it further ahead), who did,
+             * and the last date anyone asking for themselves can pick.
+             */
+            LocalDate openUntil, String openUntilBy, LocalDate lastDate) {
+    }
+
+    /** A manager or admin opens an area's requests up to a date, or back to the usual window (null). */
+    public record OpenUntilRequest(@NotNull Long areaId, LocalDate until) {
+    }
+
+    public record OpenUntilResponse(Long areaId, LocalDate until, String by) {
     }
 
     public record PortalRequest(@NotNull PortalMode mode) {

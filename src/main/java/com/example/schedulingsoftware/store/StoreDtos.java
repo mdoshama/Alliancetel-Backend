@@ -52,11 +52,20 @@ public final class StoreDtos {
         }
     }
 
-    /** One day's hours. When {@code closed} is true the times are ignored. */
-    public record DayHours(@NotNull DayOfWeek day, LocalTime opensAt, LocalTime closesAt, boolean closed) {
+    /**
+     * One day's hours. When {@code closed} is true the times are ignored. {@code minStaff} is the fewest people needed
+     * that day when it differs from the store's usual minimum; null uses the store's minimum.
+     */
+    public record DayHours(@NotNull DayOfWeek day, LocalTime opensAt, LocalTime closesAt, boolean closed,
+            @Min(0) @Max(50) Integer minStaff) {
+
+        /** Without a day-specific minimum (the store's usual one applies). */
+        public DayHours(DayOfWeek day, LocalTime opensAt, LocalTime closesAt, boolean closed) {
+            this(day, opensAt, closesAt, closed, null);
+        }
 
         public static DayHours from(StoreDayHours h) {
-            return new DayHours(h.getDayOfWeek(), h.getOpensAt(), h.getClosesAt(), h.isClosed());
+            return new DayHours(h.getDayOfWeek(), h.getOpensAt(), h.getClosesAt(), h.isClosed(), h.getMinStaff());
         }
 
         /** All seven days, Monday first, with defaults filled in. */

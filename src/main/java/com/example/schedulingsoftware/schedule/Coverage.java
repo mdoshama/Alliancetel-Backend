@@ -55,14 +55,14 @@ public final class Coverage {
 
     /** Sum of the stores' minimum staffing on that day. */
     public int needed(LocalDate date) {
-        return stores.stream().filter(s -> s.isOpenOn(date)).mapToInt(s -> Math.max(0, s.getMinStaffPerDay())).sum();
+        return stores.stream().mapToInt(s -> s.minStaffOn(date)).sum();
     }
 
     /** The day with everyone in {@code off} away. */
     public Day day(LocalDate date, Set<Long> off) {
         List<Store> open = stores.stream().filter(s -> s.isOpenOn(date)).toList();
         List<Employee> working = staff.stream().filter(e -> !off.contains(e.getId())).toList();
-        int needed = open.stream().mapToInt(s -> Math.max(0, s.getMinStaffPerDay())).sum();
+        int needed = open.stream().mapToInt(s -> s.minStaffOn(date)).sum();
         if (open.isEmpty()) {
             return new Day(date, 0, working.size(), 0, List.of());
         }
@@ -77,7 +77,7 @@ public final class Coverage {
             int gate = 2 + open.size() + i;
             storeNode.put(s.getId(), node);
             gateNode.put(s.getId(), gate);
-            flow.add(node, 1, Math.max(0, s.getMinStaffPerDay()));
+            flow.add(node, 1, s.minStaffOn(date));
             flow.add(gate, node, s.getMaxFloatersPerDay() > 0 ? s.getMaxFloatersPerDay() : working.size());
         }
         for (int i = 0; i < working.size(); i++) {
@@ -95,7 +95,7 @@ public final class Coverage {
         List<String> shortStores = new ArrayList<>();
         for (Store s : open) {
             int filled = flow.flowInto(storeNode.get(s.getId()), 1);
-            if (filled < s.getMinStaffPerDay()) {
+            if (filled < s.minStaffOn(date)) {
                 shortStores.add(s.getName());
             }
         }

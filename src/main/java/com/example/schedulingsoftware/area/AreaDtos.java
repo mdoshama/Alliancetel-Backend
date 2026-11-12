@@ -21,6 +21,17 @@ public final class AreaDtos {
             String name,
             String description,
             boolean active,
-            long employeeCount) {
+            long employeeCount,
+            /** Employees may ask for days off up to this date (opened further ahead); null = the usual window. */
+            java.time.LocalDate requestsOpenUntil,
+            String requestsOpenedBy) {
+
+        public AreaResponse(Long id, String name, String description, boolean active, long employeeCount) {
+            this(id, name, description, active, employeeCount, null, null);
+        }
+    }
+
+    /** Opens day-off requests for an area up to a date, or back to the usual window with {@code until = null}. */
+    public record RequestsOpenUntilRequest(java.time.LocalDate until) {
     }
 }

@@ -85,6 +85,9 @@ public class AreaService {
     }
 
     private AreaResponse toResponse(Area area, long employeeCount) {
-        return new AreaResponse(area.getId(), area.getName(), area.getDescription(), area.isActive(), employeeCount);
+        java.time.LocalDate until = area.getRequestsOpenUntil();
+        boolean current = until != null && !until.isBefore(java.time.LocalDate.now());
+        return new AreaResponse(area.getId(), area.getName(), area.getDescription(), area.isActive(), employeeCount,
+                current ? until : null, current ? area.getRequestsOpenedBy() : null);
     }
 }

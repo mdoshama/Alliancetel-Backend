@@ -2,6 +2,7 @@ package com.example.schedulingsoftware.dayoff;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -195,6 +196,36 @@ class WeeklyRequestRulesTest {
         BusinessRuleException e = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
                 new CreateDayOffRequest(anna, List.of(tooFar), "Wedding", true)));
         assertTrue(e.getMessage().contains("2 weeks ahead"), e.getMessage());
+    }
+
+    @Test
+    void aManagerCanOpenRequestsFurtherAheadForTheirArea() {
+        LocalDate later = open.plusWeeks(3).plusDays(1);
+        as(anna);
+        assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(later), null, null)), "normally only the open week");
+        // Employees can't open it themselves.
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> dayOffService.setOpenUntil(area, later.plusDays(10)));
+
+        TestUsers.signInAs(9001L, Role.MANAGER, area);
+        assertEquals(later.plusDays(10), dayOffService.setOpenUntil(area, later.plusDays(10)).until());
+        as(anna);
+        assertEquals(later.plusDays(10), dayOffService.window().openUntil());
+        assertEquals(1, dayOffService.create(new CreateDayOffRequest(anna, List.of(later), null, null)).size());
+        BusinessRuleException tooFar = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(later.plusDays(14)), null, null)));
+        assertTrue(tooFar.getMessage().contains("until"), tooFar.getMessage());
+
+        // A manager of another area can't; back to the usual window when cleared.
+        TestUsers.signInAs(9002L, Role.MANAGER, area + 1000);
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> dayOffService.setOpenUntil(area, null));
+        TestUsers.signInAs(9001L, Role.MANAGER, area);
+        assertNull(dayOffService.setOpenUntil(area, null).until());
+        as(ben);
+        assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(ben, List.of(later), null, null)));
     }
 
     @Test

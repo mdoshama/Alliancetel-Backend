@@ -61,6 +61,7 @@ public class DayOffService {
     private final java.time.ZoneId zone;
     private final DayOffReservations reservations;
     private final RequestPortal portal;
+    private final com.example.schedulingsoftware.area.AreaRepository areaRepository;
 
     public DayOffService(DayOffRequestRepository repository,
             EmployeeService employeeService,
@@ -72,7 +73,9 @@ public class DayOffService {
             @Value("${alliancetel.scheduling.one-emergency-per-month:true}") boolean oneEmergencyPerMonth,
             @Value("${alliancetel.scheduling.zone:America/Los_Angeles}") String zone,
             DayOffReservations reservations,
-            RequestPortal portal) {
+            RequestPortal portal,
+            com.example.schedulingsoftware.area.AreaRepository areaRepository) {
+        this.areaRepository = areaRepository;
         this.reservations = reservations;
         this.portal = portal;
         this.requestWindow = requestWindow;
@@ -202,13 +205,13 @@ public class DayOffService {
             throw new AccessDeniedException("Only a manager or admin can give someone else a day off directly.");
         }
         if (selfService && !emergency && requestWindow) {
-            checkWindow(dates);
+            checkWindow(employee, dates);
         }
         if (selfService && emergency && oneEmergencyPerMonth) {
             checkEmergencyLimit(employee, dates);
         }
         if (selfService) {
-            checkHorizon(dates);
+            checkHorizon(employee, dates);
         }
         if (selfService && emergency) {
             checkEmergencyOnlyWhenFull(employee, dates);
@@ -433,10 +436,15 @@ public class DayOffService {
         LocalDate open = RequestPortal.openWeek(today);
         RequestPortalSetting setting = portal.setting();
         List<LocalDate> weeks = RequestPortal.openWeeks(setting.getMode(), today);
+        CurrentUser user = accessPolicy.current();
+        com.example.schedulingsoftware.area.Area area = user.areaId() == null ? null
+                : areaRepository.findById(user.areaId()).orElse(null);
+        LocalDate until = openUntil(area);
         return new DayOffDtos.RequestWindow(requestWindow, open, open.plusDays(6), open.minusDays(3),
                 open.plusDays(7).minusDays(9), oneEmergencyPerMonth,
-                oneEmergencyPerMonth && emergencyUsed(accessPolicy.current().id(), today), setting.getMode(), weeks,
-                setting.getChangedBy(), setting.getChangedAt(), reservations.isEnabled());
+                oneEmergencyPerMonth && emergencyUsed(user.id(), today), setting.getMode(), weeks,
+                setting.getChangedBy(), setting.getChangedAt(), reservations.isEnabled(),
+                until, until == null ? null : area.getRequestsOpenedBy(), lastSelfServiceDate(until));
     }
 
     /** Admins: opens or closes the request portal, or puts it back on the normal Friday cycle. */
@@ -458,9 +466,66 @@ public class DayOffService {
         return RequestPortal.openWeek(today);
     }
 
-    private void checkWindow(java.util.Collection<LocalDate> dates) {
+    /** Managers (their own area) and admins: employees may ask up to {@code until}; null goes back to the usual window. */
+    @Transactional
+    public DayOffDtos.OpenUntilResponse setOpenUntil(Long areaId, LocalDate until) {
+        accessPolicy.requireManagerOf(areaId);
+        com.example.schedulingsoftware.area.Area area = areaRepository.findById(areaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Area", areaId));
+        LocalDate today = portal.today();
+        if (until != null) {
+            if (!until.isAfter(today)) {
+                throw new BusinessRuleException("Pick a date after today.");
+            }
+            if (until.isAfter(today.plusYears(1))) {
+                throw new BusinessRuleException("Requests can be opened up to a year ahead.");
+            }
+        }
+        area.setRequestsOpenUntil(until);
+        area.setRequestsOpenedBy(until == null ? null : accessPolicy.current().fullName());
+        area.setRequestsOpenedAt(until == null ? null : Instant.now());
+        return new DayOffDtos.OpenUntilResponse(areaId, until, area.getRequestsOpenedBy());
+    }
+
+    /** The date the area takes requests up to, when a manager opened them further ahead and it hasn't passed. */
+    private LocalDate openUntil(com.example.schedulingsoftware.area.Area area) {
+        LocalDate until = area == null ? null : area.getRequestsOpenUntil();
+        return until != null && !until.isBefore(portal.today()) ? until : null;
+    }
+
+    /** The last date someone asking for themselves can pick: two weeks ahead, or further when their area is open. */
+    private LocalDate lastSelfServiceDate(LocalDate openUntil) {
+        LocalDate usual = weekStart(portal.today()).plusWeeks(SELF_SERVICE_WEEKS_AHEAD).plusDays(6);
+        return openUntil != null && openUntil.isAfter(usual) ? openUntil : usual;
+    }
+
+    /**
+     * Whether someone asking for themselves can ask for this date now: in a week taking requests, or (from next week
+     * on) up to the date their manager opened requests until.
+     */
+    private boolean openForRequests(Employee employee, LocalDate date) {
+        LocalDate today = portal.today();
+        if (RequestPortal.openWeeks(portal.mode(), today).contains(weekStart(date))) {
+            return true;
+        }
+        LocalDate until = openUntil(employee.getArea());
+        return until != null && !date.isAfter(until) && !weekStart(date).isBefore(weekStart(today).plusWeeks(1));
+    }
+
+    private void checkWindow(Employee employee, java.util.Collection<LocalDate> dates) {
         LocalDate today = portal.today();
         PortalMode mode = portal.mode();
+        LocalDate until = openUntil(employee.getArea());
+        if (until != null) {
+            for (LocalDate date : dates) {
+                if (!openForRequests(employee, date)) {
+                    throw new BusinessRuleException("You can ask for days off from the week of "
+                            + shortDate(weekStart(today).plusWeeks(1)) + " until " + shortDate(until) + ". "
+                            + shortDate(date) + " isn't in that range.");
+                }
+            }
+            return;
+        }
         if (mode == PortalMode.CLOSED) {
             throw new BusinessRuleException("Day-off requests are closed right now. For something urgent, send an "
                     + "emergency request, or ask your manager.");
@@ -505,12 +570,15 @@ public class DayOffService {
     static final int SELF_SERVICE_WEEKS_AHEAD = 2;
 
     /** People asking for themselves can only reach the current week and the next two. */
-    private void checkHorizon(java.util.Collection<LocalDate> dates) {
-        LocalDate lastAllowed = weekStart(portal.today()).plusWeeks(SELF_SERVICE_WEEKS_AHEAD).plusDays(6);
+    private void checkHorizon(Employee employee, java.util.Collection<LocalDate> dates) {
+        LocalDate until = openUntil(employee.getArea());
+        LocalDate lastAllowed = lastSelfServiceDate(until);
         for (LocalDate date : dates) {
             if (date.isAfter(lastAllowed)) {
-                throw new BusinessRuleException("You can ask for days off up to " + SELF_SERVICE_WEEKS_AHEAD
-                        + " weeks ahead (until " + shortDate(lastAllowed) + "). " + shortDate(date) + " is too far.");
+                throw new BusinessRuleException(until != null && until.equals(lastAllowed)
+                        ? "Requests are open until " + shortDate(lastAllowed) + ". " + shortDate(date) + " is too far."
+                        : "You can ask for days off up to " + SELF_SERVICE_WEEKS_AHEAD + " weeks ahead (until "
+                                + shortDate(lastAllowed) + "). " + shortDate(date) + " is too far.");
             }
         }
     }
@@ -532,9 +600,6 @@ public class DayOffService {
     /** The first day in the week they could still get with a normal request, or null when the week is full for them. */
     private LocalDate firstOpenDay(Employee employee, LocalDate monday) {
         LocalDate today = portal.today();
-        if (requestWindow && !RequestPortal.openWeeks(portal.mode(), today).contains(monday)) {
-            return null;
-        }
         LocalDate sunday = monday.plusDays(6);
         LocalDate from = monday.isBefore(today) ? today : monday;
         if (from.isAfter(sunday)) {
@@ -548,7 +613,8 @@ public class DayOffService {
         java.util.Set<LocalDate> taken = new java.util.HashSet<>();
         takenDays(employee, from, sunday).forEach(t -> taken.add(t.date()));
         for (LocalDate d = from; !d.isAfter(sunday); d = d.plusDays(1)) {
-            if (!taken.contains(d) && !repository.existsByEmployeeIdAndOffDate(employee.getId(), d)) {
+            if ((!requestWindow || openForRequests(employee, d)) && !taken.contains(d)
+                    && !repository.existsByEmployeeIdAndOffDate(employee.getId(), d)) {
                 return d;
             }
         }

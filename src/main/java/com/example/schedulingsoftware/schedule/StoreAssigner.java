@@ -38,7 +38,18 @@ public class StoreAssigner {
      * A store that can be assigned, with its minimum people per day (0 = no minimum) and the dates it is closed.
      * Nobody is sent to a store on a day it is closed, and its minimum does not apply that day.
      */
-    public record StoreSlot(Long storeId, int minStaffPerDay, Set<LocalDate> closedDates, int maxFloatersPerDay) {
+    public record StoreSlot(Long storeId, int minStaffPerDay, Set<LocalDate> closedDates, int maxFloatersPerDay,
+            /** Minimums for dates that differ from {@code minStaffPerDay} (e.g. fewer on Sunday). */
+            Map<LocalDate, Integer> dailyMin) {
+
+        public StoreSlot(Long storeId, int minStaffPerDay, Set<LocalDate> closedDates, int maxFloatersPerDay) {
+            this(storeId, minStaffPerDay, closedDates, maxFloatersPerDay, Map.of());
+        }
+
+        /** The minimum on that date. */
+        public int minOn(LocalDate date) {
+            return Math.max(0, dailyMin.getOrDefault(date, minStaffPerDay));
+        }
 
         public StoreSlot(Long storeId, int minStaffPerDay) {
             this(storeId, minStaffPerDay, Set.of(), 0);
@@ -50,6 +61,7 @@ public class StoreAssigner {
 
         public StoreSlot {
             closedDates = closedDates == null ? Set.of() : Set.copyOf(closedDates);
+            dailyMin = dailyMin == null ? Map.of() : Map.copyOf(dailyMin);
         }
     }
 
@@ -94,7 +106,7 @@ public class StoreAssigner {
             sortedStores.stream()
                     .filter(s -> !s.closedDates().contains(date))
                     .forEach(s -> {
-                        minimums.put(s.storeId(), Math.max(0, s.minStaffPerDay()));
+                        minimums.put(s.storeId(), s.minOn(date));
                         if (s.maxFloatersPerDay() > 0) {
                             floaterCaps.put(s.storeId(), s.maxFloatersPerDay());
                         }
