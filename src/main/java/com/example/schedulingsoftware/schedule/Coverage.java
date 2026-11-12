@@ -103,14 +103,19 @@ public final class Coverage {
     }
 
     /**
-     * Whether {@code employeeId} can be off that day on top of {@code off}: the stores are no worse covered without
-     * them (a day already short stays as short, it doesn't get shorter).
+     * Whether {@code employeeId} can be off that day on top of {@code off}: no store ends up shorter, and on a day a
+     * store is short anyway, there are still at least as many people working as the stores need (otherwise they
+     * should work, not be off).
      */
     public boolean canBeOff(LocalDate date, Set<Long> off, Long employeeId) {
-        Day before = day(date, off);
         Set<Long> more = new java.util.HashSet<>(off);
         more.add(employeeId);
-        return day(date, more).shortBy() <= before.shortBy();
+        return fine(day(date, off), day(date, more));
+    }
+
+    /** One more person off ({@code before} → {@code after}) keeps the day fine (see {@link #canBeOff}). */
+    public static boolean fine(Day before, Day after) {
+        return after.shortBy() <= before.shortBy() && (after.shortBy() == 0 || after.spare() >= 0);
     }
 
     /** The stores this person can be placed at on that day (same rules as {@link StoreAssigner}). */

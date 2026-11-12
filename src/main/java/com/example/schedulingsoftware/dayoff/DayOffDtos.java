@@ -58,7 +58,12 @@ public final class DayOffDtos {
              * The signed-in person's area takes requests up to this date (a manager opened it further ahead), who did,
              * and the last date anyone asking for themselves can pick.
              */
-            LocalDate openUntil, String openUntilBy, LocalDate lastDate) {
+            LocalDate openUntil, String openUntilBy, LocalDate lastDate,
+            /**
+             * Weeks (Mondays) whose schedule is already published in their area: the day off it gives them there stays,
+             * so picking another day that week is an emergency.
+             */
+            List<LocalDate> publishedWeeks) {
     }
 
     /** A manager or admin opens an area's requests up to a date, or back to the usual window (null). */
@@ -142,12 +147,24 @@ public final class DayOffDtos {
             /** Reserved by the system; gives way when they ask for another day. */
             boolean reserved,
             /** Reserved because it is one of their regular days off. */
-            boolean regular) {
+            boolean regular,
+            /**
+             * Emergencies, for managers and admins: the person's other days off that same week (their regular day,
+             * the one the system gave them, days they asked for, other emergencies), so the whole week is in view.
+             * Null otherwise.
+             */
+            List<WeekDayOff> weekDaysOff) {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, update, reserved, regular);
+                    decisionChangeReason, decisionChangedAt, update, reserved, regular, weekDaysOff);
+        }
+
+        public DayOffResponse withWeekDaysOff(List<WeekDayOff> days) {
+            return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
+                    reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
+                    decisionChangeReason, decisionChangedAt, scheduleUpdate, reserved, regular, days);
         }
 
         public static DayOffResponse from(DayOffRequest r) {
@@ -173,7 +190,21 @@ public final class DayOffDtos {
                     r.getDecisionChangedAt(),
                     null,
                     r.isReserved(),
-                    r.isRegular());
+                    r.isRegular(),
+                    null);
+        }
+    }
+
+    /**
+     * Another day off the same person has that week. {@code kind}: REGULAR (their usual day), SYSTEM (the system gave
+     * it), ASKED (they asked for it) or EMERGENCY.
+     */
+    public record WeekDayOff(Long id, LocalDate date, String kind, DayOffStatus status) {
+
+        public static WeekDayOff from(DayOffRequest r) {
+            String kind = r.isEmergency() ? "EMERGENCY"
+                    : r.isRegular() ? "REGULAR" : r.isReserved() ? "SYSTEM" : "ASKED";
+            return new WeekDayOff(r.getId(), r.getOffDate(), kind, r.getStatus());
         }
     }
 }

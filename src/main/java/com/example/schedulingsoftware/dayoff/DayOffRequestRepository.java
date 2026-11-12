@@ -29,6 +29,9 @@ public interface DayOffRequestRepository
 
     /** Like the count above, but leaving out emergency requests (they don't use up the weekly limit). */
     /** Reserved days in a range, latest first (the one given back first when they ask for another day). */
+    List<DayOffRequest> findByEmployeeIdInAndOffDateBetween(java.util.Collection<Long> employeeIds, LocalDate from,
+            LocalDate to);
+
     List<DayOffRequest> findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(Long employeeId,
             LocalDate from, LocalDate to);
 

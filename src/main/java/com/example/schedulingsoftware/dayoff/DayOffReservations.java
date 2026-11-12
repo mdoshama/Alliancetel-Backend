@@ -166,6 +166,15 @@ public class DayOffReservations {
         LocalDate today = portal.today();
         // Regular days off first, whatever the staffing: managers decide on them (they're never approved here).
         int n = reserveRegularDays(areaId, weekStart, today);
+        // Days the system picked on a day the stores turned out short (someone else got that day too, a store's
+        // minimum went up, …) are given back, so those people work there and get a better day below.
+        List<DayOffRequest> misplaced = weekRequests.misplacedReserved(areaId, weekStart);
+        if (!misplaced.isEmpty()) {
+            repository.deleteAll(misplaced);
+            repository.flush();
+            log.info("Moved {} day(s) off the system picked on short days (area {}, week of {})", misplaced.size(),
+                    areaId, weekStart);
+        }
         for (WeekRequests.Suggestion s : weekRequests.suggestFor(areaId, weekStart)) {
             // Only future days, and never twice on the same date.
             LocalDate date = s.options().stream().filter(d -> d.isAfter(today)).findFirst().orElse(null);

@@ -229,6 +229,63 @@ public class WeekRequests {
         return employeeRepository.findById(id).orElseThrow();
     }
 
+    /**
+     * Days the system picked (still pending) that sit on a day the stores are short, where having that person work
+     * instead helps: they're given back so the person gets a better day. Regular days and days people asked for stay.
+     */
+    @Transactional(readOnly = true)
+    public List<DayOffRequest> misplacedReserved(Long areaId, LocalDate anyDayInWeek) {
+        LocalDate week = DayOffService.weekStart(anyDayInWeek);
+        List<DayOffRequest> requests = requests(areaId, week);
+        Coverage coverage = Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff(areaId));
+        Map<LocalDate, Set<Long>> off = offByDate(requests);
+        List<DayOffRequest> out = new ArrayList<>();
+        for (LocalDate d = week; d.isBefore(week.plusDays(7)); d = d.plusDays(1)) {
+            LocalDate date = d;
+            Set<Long> o = new HashSet<>(off.getOrDefault(date, Set.of()));
+            List<DayOffRequest> movable = requests.stream()
+                    .filter(r -> r.getOffDate().equals(date) && r.isMovable())
+                    .sorted(Comparator.comparing(DayOffRequest::getId).reversed()).toList();
+            for (DayOffRequest r : movable) {
+                Coverage.Day now = coverage.day(date, o);
+                if (now.shortBy() == 0) {
+                    break;
+                }
+                Set<Long> less = new HashSet<>(o);
+                less.remove(r.getEmployee().getId());
+                Coverage.Day back = coverage.day(date, less);
+                // Short, and either they'd fill a gap or the stores have fewer people than they need; and only
+                // when there's a day the stores can spare them, so a week short everywhere doesn't keep reshuffling.
+                if ((back.shortBy() < now.shortBy() || now.spare() < 0)
+                        && hasBetterDay(coverage, requests, off, r.getEmployee().getId(), week, date)) {
+                    out.add(r);
+                    o = less;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Another day that week where they could be off with every store still covered. */
+    private static boolean hasBetterDay(Coverage coverage, List<DayOffRequest> requests, Map<LocalDate, Set<Long>> off,
+            Long employeeId, LocalDate week, LocalDate notThis) {
+        Set<LocalDate> theirs = requests.stream().filter(x -> x.getEmployee().getId().equals(employeeId))
+                .map(DayOffRequest::getOffDate).collect(Collectors.toSet());
+        for (LocalDate d = week; d.isBefore(week.plusDays(7)); d = d.plusDays(1)) {
+            if (!d.equals(notThis) && !theirs.contains(d)
+                    && coverage.day(d, plus(off.getOrDefault(d, Set.of()), employeeId)).shortBy() == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<Long> plus(Set<Long> ids, Long id) {
+        Set<Long> more = new HashSet<>(ids);
+        more.add(id);
+        return more;
+    }
+
     /** Same as {@link #suggest} without the access check (used to reserve days off). */
     @Transactional(readOnly = true)
     public List<Suggestion> suggestFor(Long areaId, LocalDate anyDayInWeek) {
@@ -303,13 +360,15 @@ public class WeekRequests {
                     plus.add(e.getId());
                     Coverage.Day after = coverage.day(d, plus);
                     without.put(d, after);
-                    fits.put(d, after.shortBy() <= coverage.day(d, o).shortBy());
+                    fits.put(d, Coverage.fine(coverage.day(d, o), after));
                 }
                 List<LocalDate> options = dates.stream()
                         .filter(d -> !taken.contains(d))
                         .sorted(Comparator
                                 // Days the stores can still be covered without them first.
                                 .comparing((LocalDate d) -> !fits.get(d))
+                                // Then the day left least short (ideally not short at all).
+                                .thenComparing(d -> without.get(d).shortBy())
                                 // Then a day nobody else at their store is off.
                                 .thenComparing(d -> home != null && storeOff.getOrDefault(home, Set.of()).contains(d))
                                 // Then the day with the most people to spare once they're off.

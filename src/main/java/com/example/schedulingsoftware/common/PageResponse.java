@@ -27,6 +27,11 @@ public record PageResponse<T>(List<T> content, int page, int size, long totalEle
                 page.getTotalElements(), page.getTotalPages());
     }
 
+    /** The same page with its items replaced (same count and order). */
+    public PageResponse<T> withContent(List<T> items) {
+        return new PageResponse<>(items, page, size, totalElements, totalPages);
+    }
+
     /** A page request with the number and size kept in range (negative page → 0, size 1–100). */
     public static PageRequest request(Integer page, Integer size, Sort sort) {
         int p = page == null ? 0 : Math.max(0, page);

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Sort;
@@ -92,10 +93,10 @@ public class DayOffService {
     @Transactional(readOnly = true)
     public List<DayOffResponse> search(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
             LocalDate from, LocalDate to) {
-        return repository.findAll(filter(requestedAreaId, requestedEmployeeId, status, from, to, null),
+        return withWeek(repository.findAll(filter(requestedAreaId, requestedEmployeeId, status, from, to, null),
                 Sort.by("offDate", "id")).stream()
                 .map(DayOffResponse::from)
-                .toList();
+                .toList());
     }
 
     /** One page of requests, oldest day first; "q" matches the employee's name or code. */
@@ -118,8 +119,38 @@ public class DayOffService {
         // Managers and admins see each person's days together, people A to Z; employees see their own by date.
         Sort order = accessPolicy.current().isEmployee() ? Sort.by("offDate", "id")
                 : Sort.by("employee.firstName", "employee.lastName", "employee.id", "offDate", "id");
-        return PageResponse.from(repository.findAll(spec, PageResponse.request(page, size, order)),
-                DayOffResponse::from);
+        PageResponse<DayOffResponse> result = PageResponse.from(
+                repository.findAll(spec, PageResponse.request(page, size, order)), DayOffResponse::from);
+        return result.withContent(withWeek(result.content()));
+    }
+
+    /**
+     * For managers and admins: adds to each emergency the person's other days off that week (regular, given by the
+     * system, asked for, other emergencies; not turned down), so they see everything before deciding.
+     */
+    private List<DayOffResponse> withWeek(List<DayOffResponse> list) {
+        if (accessPolicy.current().isEmployee() || list.stream().noneMatch(DayOffResponse::emergency)) {
+            return list;
+        }
+        List<DayOffResponse> emergencies = list.stream().filter(DayOffResponse::emergency).toList();
+        LocalDate from = emergencies.stream().map(r -> weekStart(r.date())).min(LocalDate::compareTo).orElseThrow();
+        LocalDate to = emergencies.stream().map(r -> weekStart(r.date()).plusDays(6)).max(LocalDate::compareTo)
+                .orElseThrow();
+        java.util.Set<Long> people = new java.util.HashSet<>();
+        emergencies.forEach(r -> people.add(r.employeeId()));
+        List<DayOffRequest> around = repository.findByEmployeeIdInAndOffDateBetween(people, from, to).stream()
+                .filter(r -> r.getStatus() != DayOffStatus.REJECTED).toList();
+        return list.stream().map(r -> {
+            if (!r.emergency()) {
+                return r;
+            }
+            LocalDate monday = weekStart(r.date());
+            return r.withWeekDaysOff(around.stream()
+                    .filter(o -> o.getEmployee().getId().equals(r.employeeId()) && !o.getId().equals(r.id())
+                            && !o.getOffDate().isBefore(monday) && !o.getOffDate().isAfter(monday.plusDays(6)))
+                    .sorted(java.util.Comparator.comparing(DayOffRequest::getOffDate))
+                    .map(DayOffDtos.WeekDayOff::from).toList());
+        }).toList();
     }
 
     private Specification<DayOffRequest> filter(Long requestedAreaId, Long requestedEmployeeId, DayOffStatus status,
@@ -133,6 +164,8 @@ public class DayOffService {
         Long areaId = accessPolicy.restrictToArea(requestedAreaId);
         // Employees only ever see their own requests.
         Long employeeId = user.isEmployee() ? user.id() : requestedEmployeeId;
+        // Weeks already published in an employee's area: the days the system gave them there are final.
+        List<LocalDate> publishedDays = user.isEmployee() ? publishedDays(user.areaId(), from, to) : List.of();
         return (root, cq, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (areaId != null) {
@@ -144,7 +177,11 @@ public class DayOffService {
             if (user.isEmployee()) {
                 // Days the system picked are planning: employees see them on the published schedule only. Their
                 // regular day off is theirs, so they see it.
-                predicates.add(cb.or(cb.isFalse(root.get("reserved")), cb.isTrue(root.get("regular"))));
+                // Once the week is published they're final (and on the schedule), so they see them then.
+                predicates.add(publishedDays.isEmpty()
+                        ? cb.or(cb.isFalse(root.get("reserved")), cb.isTrue(root.get("regular")))
+                        : cb.or(cb.isFalse(root.get("reserved")), cb.isTrue(root.get("regular")),
+                                root.get("offDate").in(publishedDays)));
             }
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
@@ -268,8 +305,15 @@ public class DayOffService {
         if (!emergency && !override) {
             int limit = normalDaysOffPerWeek(employee);
             requestedPerWeek.forEach((monday, count) -> {
-                long existing = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
-                        employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
+                List<DayOffRequest> fixed = fixedDaysOff(employee, monday);
+                if (!fixed.isEmpty() && fixed.size() + count > limit) {
+                    String days = fixed.stream().map(r -> dayName(r.getOffDate())).collect(Collectors.joining(", "));
+                    throw new BusinessRuleException("The week of " + shortDate(monday) + " is already published with "
+                            + employee.getFirstName() + " off on " + days + ". " + employee.getFirstName() + " works "
+                            + employee.getWorkDaysPerWeek() + " days a week, so another day off that week needs an "
+                            + "emergency request.");
+                }
+                long existing = usedNormalDays(employee, monday);
                 if (existing + count > limit) {
                     throw new BusinessRuleException(employee.getFullName() + " works " + employee.getWorkDaysPerWeek()
                             + " days a week, so only " + limit + " day" + (limit == 1 ? "" : "s") + " off can be "
@@ -448,7 +492,8 @@ public class DayOffService {
                 open.plusDays(7).minusDays(9), oneEmergencyPerMonth,
                 oneEmergencyPerMonth && emergencyUsed(user.id(), today), setting.getMode(), weeks,
                 setting.getChangedBy(), setting.getChangedAt(), reservations.isEnabled(),
-                until, until == null ? null : area.getRequestsOpenedBy(), lastSelfServiceDate(until));
+                until, until == null ? null : area.getRequestsOpenedBy(), lastSelfServiceDate(until),
+                publishedWeeks(user.areaId(), weekStart(portal.today()).plusWeeks(8)));
     }
 
     /** Admins: opens or closes the request portal, or puts it back on the normal Friday cycle. */
@@ -617,15 +662,67 @@ public class DayOffService {
         }
     }
 
+    /**
+     * Their normal days off that week: the ones they asked for (not emergencies), plus, once the week's schedule is
+     * published, the days the schedule already gives them (regular or picked by the system). Before publishing those
+     * are swapped for a day they pick; after, they stay, so picking another day would be a second day off.
+     */
+    private long usedNormalDays(Employee employee, LocalDate monday) {
+        return repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
+                employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES) + fixedDaysOff(employee, monday).size();
+    }
+
+    /** Days the published schedule already gives them that week (regular or picked by the system); none before. */
+    private List<DayOffRequest> fixedDaysOff(Employee employee, LocalDate monday) {
+        if (employee.getArea() == null || !reservations.published(employee.getArea().getId(), monday)) {
+            return List.of();
+        }
+        return repository.findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(employee.getId(), monday,
+                monday.plusDays(6)).stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
+                .sorted(java.util.Comparator.comparing(DayOffRequest::getOffDate)).toList();
+    }
+
+    /** Every date in the area's published weeks between from and to (about 8 weeks either side of today if open). */
+    private List<LocalDate> publishedDays(Long areaId, LocalDate from, LocalDate to) {
+        if (areaId == null) {
+            return List.of();
+        }
+        LocalDate today = portal.today();
+        LocalDate start = weekStart(from != null ? from : today.minusWeeks(8));
+        LocalDate end = to != null ? to : today.plusWeeks(8);
+        if (start.isBefore(end.minusWeeks(30))) {
+            start = weekStart(end.minusWeeks(30));
+        }
+        List<LocalDate> days = new ArrayList<>();
+        for (LocalDate m = start; !m.isAfter(end); m = m.plusWeeks(1)) {
+            if (reservations.published(areaId, m)) {
+                m.datesUntil(m.plusDays(7)).forEach(days::add);
+            }
+        }
+        return days;
+    }
+
+    /** Weeks (Mondays) from this week to {@code last} whose schedule is published in the area. */
+    private List<LocalDate> publishedWeeks(Long areaId, LocalDate last) {
+        if (areaId == null || last == null) {
+            return List.of();
+        }
+        List<LocalDate> weeks = new ArrayList<>();
+        for (LocalDate m = weekStart(portal.today()); !m.isAfter(last); m = m.plusWeeks(1)) {
+            if (reservations.published(areaId, m)) {
+                weeks.add(m);
+            }
+        }
+        return weeks;
+    }
+
     /** Whether they could get this day with a normal request right now. */
     private boolean openForNormalRequest(Employee employee, LocalDate date) {
         if (date.isBefore(portal.today()) || (requestWindow && !openForRequests(employee, date))) {
             return false;
         }
         LocalDate monday = weekStart(date);
-        long normal = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
-                employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
-        if (normal >= normalDaysOffPerWeek(employee)) {
+        if (usedNormalDays(employee, monday) >= normalDaysOffPerWeek(employee)) {
             return false;
         }
         boolean taken = takenDays(employee, date, date).stream().anyMatch(t -> t.date().equals(date));
@@ -640,9 +737,7 @@ public class DayOffService {
         if (from.isAfter(sunday)) {
             return null;
         }
-        long normal = repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
-                employee.getId(), monday, sunday, OPEN_STATUSES);
-        if (normal >= normalDaysOffPerWeek(employee)) {
+        if (usedNormalDays(employee, monday) >= normalDaysOffPerWeek(employee)) {
             return null;
         }
         java.util.Set<LocalDate> taken = new java.util.HashSet<>();

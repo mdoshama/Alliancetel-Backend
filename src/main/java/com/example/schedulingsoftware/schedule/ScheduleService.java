@@ -705,7 +705,7 @@ public class ScheduleService {
         withMe.add(employee.getId());
         Coverage.Day before = coverage.day(date, off);
         Coverage.Day after = coverage.day(date, withMe);
-        boolean full = after.shortBy() > before.shortBy();
+        boolean full = !Coverage.fine(before, after);
         return new DayRoom(date, after.needed(), after.working(), List.copyOf(asked.values()), full,
                 full ? after.shortStores() : List.of());
     }
