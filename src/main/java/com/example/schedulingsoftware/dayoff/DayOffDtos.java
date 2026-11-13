@@ -236,12 +236,19 @@ public final class DayOffDtos {
      * Another day off the same person has that week. {@code kind}: REGULAR (their usual day), SYSTEM (the system gave
      * it), ASKED (they asked for it) or EMERGENCY.
      */
-    public record WeekDayOff(Long id, LocalDate date, String kind, DayOffStatus status) {
+    /**
+     * @param reviewedBy who decided ("System", or a manager's / admin's name); null while waiting
+     * @param reviewedAt when it was decided
+     * @param createdAt  when it was asked for (or reserved)
+     */
+    public record WeekDayOff(Long id, LocalDate date, String kind, DayOffStatus status, String reviewedBy,
+            java.time.Instant reviewedAt, java.time.Instant createdAt) {
 
         public static WeekDayOff from(DayOffRequest r) {
             String kind = r.isEmergency() ? "EMERGENCY"
                     : r.isRegular() ? "REGULAR" : r.isReserved() ? "SYSTEM" : "ASKED";
-            return new WeekDayOff(r.getId(), r.getOffDate(), kind, r.getStatus());
+            return new WeekDayOff(r.getId(), r.getOffDate(), kind, r.getStatus(), r.getReviewedBy(),
+                    r.getReviewedAt(), r.getCreatedAt());
         }
     }
 }

@@ -44,6 +44,26 @@ public class AuthController {
         return authService.setupPassword(body.token(), body.newPassword(), http.getRemoteAddr());
     }
 
+    /**
+     * Public: "Forgot password?". Sends a set-password link to the account's email (or a text when there's no email).
+     * Always answers the same way, so it doesn't reveal which emails or numbers have accounts.
+     */
+    @PostMapping("/forgot-password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void forgotPassword(@Valid @RequestBody AuthDtos.ForgotPasswordRequest body, HttpServletRequest http) {
+        authService.forgotPassword(body.login(), http.getRemoteAddr());
+    }
+
+    /**
+     * Deletes the signed-in person's own account (required by the App Store and Google Play): their personal
+     * details and messages are erased and they're signed out everywhere.
+     */
+    @PostMapping("/me/delete")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteAccount(@Valid @RequestBody AuthDtos.DeleteAccountRequest body, HttpServletRequest http) {
+        authService.deleteOwnAccount(body.password(), http.getRemoteAddr());
+    }
+
     /** Your own phone number and birth date (name, NTID, email, role and store are kept by admins). */
     @PutMapping("/me/profile")
     public Me updateProfile(@Valid @RequestBody AuthDtos.ProfileUpdate body) {

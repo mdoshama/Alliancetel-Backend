@@ -189,6 +189,7 @@ public class EmployeeService {
     @Transactional
     public EmployeeResponse update(Long id, EmployeeRequest request) {
         Employee employee = getEmployee(id);
+        requireNotDeleted(employee);
         String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
         String email = emailOf(request);
         String phone = signInDetails(request, email);
@@ -327,6 +328,7 @@ public class EmployeeService {
     @Transactional
     public CredentialsResponse resetPassword(Long id, boolean textLink) {
         Employee employee = getEmployee(id);
+        requireNotDeleted(employee);
         if (!employee.isActive()) {
             throw new BusinessRuleException(employee.getFullName() + " is inactive. Reactivate them first.");
         }
@@ -337,6 +339,14 @@ public class EmployeeService {
         var link = passwordSetup.send(employee, false, textLink);
         return new CredentialsResponse(EmployeeResponse.from(employee), temporary, link.emailed(), link.texted(),
                 link.note());
+    }
+
+    /** An account its owner deleted stays deleted: it can't be reactivated or given a new password. */
+    private static void requireNotDeleted(Employee employee) {
+        if (employee.getDeletedAt() != null) {
+            throw new BusinessRuleException("This account was deleted by its owner and can't be changed. "
+                    + "Add the person again as a new employee if they come back.");
+        }
     }
 
     public Employee getEmployee(Long id) {

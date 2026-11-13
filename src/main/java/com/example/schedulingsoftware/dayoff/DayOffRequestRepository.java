@@ -14,6 +14,11 @@ public interface DayOffRequestRepository
 
     boolean existsByEmployeeIdAndOffDate(Long employeeId, LocalDate offDate);
 
+    /** Erases the free-text reasons someone gave, e.g. when they delete their account (the dates stay). */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("update DayOffRequest r set r.reason = null where r.employee.id = :employeeId")
+    int clearReasonsFor(@Param("employeeId") Long employeeId);
+
     boolean existsByEmployeeIdAndEmergencyTrueAndOffDateBetweenAndStatusIn(Long employeeId, LocalDate from,
             LocalDate to, java.util.Collection<DayOffStatus> statuses);
 

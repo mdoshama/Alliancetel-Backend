@@ -47,6 +47,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail handleIntegrity(DataIntegrityViolationException ex) {
+        // The message people see stays general; the log says exactly which rule was broken.
+        log.warn("Data conflict: {}", ex.getMostSpecificCause().getMessage());
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
                 "This change conflicts with existing data (duplicate or still in use).");
     }

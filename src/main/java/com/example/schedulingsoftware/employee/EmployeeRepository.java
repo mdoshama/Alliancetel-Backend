@@ -24,6 +24,8 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
 
     Optional<Employee> findByEmailIgnoreCase(String email);
 
+    long countByRoleAndActiveTrue(Role role);
+
     /** By phone number in +&lt;country&gt;&lt;number&gt; form (as saved). */
     java.util.List<Employee> findByPhone(String phone);
 

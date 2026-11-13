@@ -61,6 +61,8 @@ public class SecurityConfig {
                         // token on it; the first dispatch was already checked.
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        // "Forgot password?": only ever sends a link to the account's own email / phone.
+                        .requestMatchers(HttpMethod.POST, "/api/auth/forgot-password").permitAll()
                         // Set-password links from the welcome / reset email: the link's secret is the proof.
                         .requestMatchers(HttpMethod.POST, "/api/auth/setup-password", "/api/auth/setup-password/check")
                                 .permitAll()

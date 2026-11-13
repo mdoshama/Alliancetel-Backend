@@ -17,6 +17,14 @@ public final class AuthDtos {
     public record LoginRequest(@NotBlank @Size(max = 120) String email, @NotBlank @Size(max = 100) String password) {
     }
 
+    /** Deleting your own account: your password confirms it's really you. */
+    public record DeleteAccountRequest(@NotBlank @Size(max = 100) String password) {
+    }
+
+    /** "Forgot password": the email or phone number you sign in with. */
+    public record ForgotPasswordRequest(@NotBlank @Size(max = 120) String login) {
+    }
+
     public record ChangePasswordRequest(@NotBlank @Size(max = 100) String currentPassword,
             @NotBlank @Size(max = 100) String newPassword) {
     }

@@ -170,6 +170,12 @@ public class Employee {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
+    /**
+     * Set when the person deleted their own account (from the app). Their personal details are erased at that
+     * moment; the row stays only so past schedules and time records keep their shape, shown as "Deleted user".
+     */
+    private Instant deletedAt;
+
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();

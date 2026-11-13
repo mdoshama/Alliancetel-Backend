@@ -11,6 +11,11 @@ import org.springframework.data.repository.query.Param;
 
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
 
+    /** Every message sent to (or about) one person, e.g. when they delete their account. */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("delete from Notification n where n.employee.id = :employeeId")
+    int deleteForEmployee(@Param("employeeId") Long employeeId);
+
     @Query("""
             select n from Notification n left join fetch n.employee
             where n.status = com.example.schedulingsoftware.notify.NotificationStatus.QUEUED and n.nextAttemptAt <= :now

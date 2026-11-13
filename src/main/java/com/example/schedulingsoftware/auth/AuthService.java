@@ -35,6 +35,13 @@ public class AuthService {
     private final RevokedTokenRepository revokedTokens;
     private final Duration temporaryPasswordLifetime;
     private final PasswordSetupService passwordSetup;
+    private final com.example.schedulingsoftware.notify.NotificationRepository notifications;
+    private final com.example.schedulingsoftware.dayoff.DayOffRequestRepository dayOffRequests;
+    /**
+     * Limits "forgot password" requests (3 per account, 12 per address, per hour) so nobody can flood someone's
+     * inbox or phone. Kept apart from the sign-in lock so asking for a link never blocks signing in.
+     */
+    private final LoginAttemptService resetRequests = new LoginAttemptService(3, 60, java.time.Clock.systemUTC());
     /**
      * Checked when the email is unknown, so a wrong email takes as long as a wrong password and response times
      * don't reveal which emails have accounts.
@@ -44,8 +51,12 @@ public class AuthService {
     public AuthService(EmployeeRepository employeeRepository, PasswordEncoder passwordEncoder, JwtService jwtService,
             AccessPolicy accessPolicy, LoginAttemptService loginAttempts, RevokedTokenRepository revokedTokens,
             @Value("${alliancetel.security.temporary-password-hours:168}") long temporaryPasswordHours,
-            PasswordSetupService passwordSetup) {
+            PasswordSetupService passwordSetup,
+            com.example.schedulingsoftware.notify.NotificationRepository notifications,
+            com.example.schedulingsoftware.dayoff.DayOffRequestRepository dayOffRequests) {
         this.passwordSetup = passwordSetup;
+        this.notifications = notifications;
+        this.dayOffRequests = dayOffRequests;
         this.employeeRepository = employeeRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
@@ -211,6 +222,102 @@ public class AuthService {
         loginAttempts.recordSuccess(e.getEmail());
         log.info("Password changed: {} from {}", e.getEmail(), clientIp);
         return issue(e);
+    }
+
+    /**
+     * "Forgot password?": emails a set-password link to the account (texts it when there's no email on file). The
+     * current password keeps working until a new one is chosen, so a stranger asking can't lock anyone out. Says
+     * nothing about whether the account exists.
+     */
+    @Transactional
+    public void forgotPassword(String login, String clientIp) {
+        String key = login == null ? "" : login.trim().toLowerCase(Locale.ROOT);
+        try {
+            resetRequests.checkAllowed(key, clientIp);
+        } catch (LoginAttemptService.TooManyAttemptsException tooMany) {
+            log.info("Forgot-password request ignored (too many) for {} from {}", key, clientIp);
+            return;
+        }
+        resetRequests.recordFailure(key, clientIp);
+        Employee e = findAccount(key);
+        if (e == null || !e.isActive() || (e.getEmail() == null && e.getPhone() == null)) {
+            log.info("Forgot-password request for an unknown or inactive account from {}", clientIp);
+            return;
+        }
+        var result = passwordSetup.send(e, false, e.getEmail() == null);
+        log.info("Forgot-password link for employee {} from {} (emailed: {}, texted: {})", e.getId(), clientIp,
+                result.emailed(), result.texted());
+    }
+
+    /** The active account an email or phone number belongs to (only when exactly one matches). */
+    private Employee findAccount(String login) {
+        if (login.isEmpty()) {
+            return null;
+        }
+        if (login.contains("@")) {
+            return employeeRepository.findByEmailIgnoreCase(login).filter(Employee::isActive).orElse(null);
+        }
+        String phone;
+        try {
+            phone = com.example.schedulingsoftware.common.PhoneNumbers.normalize(login);
+        } catch (RuntimeException notAPhone) {
+            return null;
+        }
+        if (phone == null) {
+            return null;
+        }
+        List<Employee> found = employeeRepository.findByPhone(phone).stream().filter(Employee::isActive).toList();
+        return found.size() == 1 ? found.getFirst() : null;
+    }
+
+    /**
+     * Deletes the signed-in person's own account, after checking their password. Personal details (name, NTID,
+     * email, phone, birth date), their messages, day-off reasons and sign-in are erased for good and every session
+     * ends. Past schedules and time records stay for the company's records under "Deleted user". The last active
+     * admin can't delete themselves, so the company is never left without one.
+     */
+    @Transactional
+    public void deleteOwnAccount(String password, String clientIp) {
+        Employee e = load(accessPolicy.current().id());
+        String lockKey = e.getEmail() != null ? e.getEmail() : "employee-" + e.getId();
+        loginAttempts.checkAllowed(lockKey, clientIp);
+        if (e.getPasswordHash() == null || password == null || !passwordEncoder.matches(password, e.getPasswordHash())) {
+            loginAttempts.recordFailure(lockKey, clientIp);
+            throw new BusinessRuleException("Your password is not correct.");
+        }
+        if (e.getRole() == com.example.schedulingsoftware.employee.Role.ADMIN
+                && employeeRepository.countByRoleAndActiveTrue(com.example.schedulingsoftware.employee.Role.ADMIN) <= 1) {
+            throw new BusinessRuleException("You're the only admin. Make someone else an admin before deleting "
+                    + "your account.");
+        }
+        Long id = e.getId();
+        notifications.deleteForEmployee(id);
+        dayOffRequests.clearReasonsFor(id);
+        passwordSetup.used(e);
+        e.setFirstName("Deleted");
+        e.setLastName("user");
+        e.setEmployeeCode("DEL-" + id);
+        e.setEmail(null);
+        e.setPhone(null);
+        e.setBirthDate(null);
+        e.setWhatsappOptIn(false);
+        e.setSmsOptIn(false);
+        e.setSmsConsentAt(null);
+        e.setSmsConsentBy(null);
+        e.setEmailOptIn(false);
+        e.setPasswordHash(null);
+        e.setMustChangePassword(false);
+        e.setPasswordSetAt(null);
+        e.setLastLoginAt(null);
+        e.setActive(false);
+        e.setOnSchedule(false);
+        e.setPrimaryAtStore(false);
+        e.getFloatStores().clear();
+        e.getRegularDaysOff().clear();
+        e.setDeletedAt(Instant.now());
+        e.endAllSessions();
+        loginAttempts.recordSuccess(lockKey);
+        log.info("Employee {} deleted their own account from {}", id, clientIp);
     }
 
     /** Who a set-password link is for (wrong, used and expired links count towards the sign-in lock). */

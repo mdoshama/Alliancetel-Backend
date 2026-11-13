@@ -113,4 +113,30 @@ public class DayOffRequest {
     void onCreate() {
         createdAt = Instant.now();
     }
+
+    /** Longest text the reason and note columns hold (255 in the database). */
+    static final int TEXT_LIMIT = 255;
+
+    /**
+     * The system's explanations ("Not given: …" listing who's off where) can run long; anything past the column's
+     * size is cut with "…" instead of making the whole save (e.g. generating a week) fail.
+     */
+    static String fit(String text) {
+        if (text == null || text.length() <= TEXT_LIMIT) {
+            return text;
+        }
+        return text.substring(0, TEXT_LIMIT - 1).stripTrailing() + "\u2026";
+    }
+
+    public void setReviewNote(String reviewNote) {
+        this.reviewNote = fit(reviewNote);
+    }
+
+    public void setReason(String reason) {
+        this.reason = fit(reason);
+    }
+
+    public void setDecisionChangeReason(String decisionChangeReason) {
+        this.decisionChangeReason = fit(decisionChangeReason);
+    }
 }
