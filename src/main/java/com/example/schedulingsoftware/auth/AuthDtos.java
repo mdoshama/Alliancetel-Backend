@@ -13,6 +13,7 @@ public final class AuthDtos {
     private AuthDtos() {
     }
 
+    /** {@code email}: what they type to sign in, their email or their phone number. */
     public record LoginRequest(@NotBlank @Size(max = 120) String email, @NotBlank @Size(max = 100) String password) {
     }
 

@@ -148,7 +148,8 @@ public class ScheduleNotifier {
         String subject = newAccount ? "Set up your AllianceTel account" : "Reset your AllianceTel password";
         String text = newAccount
                 ? "Hi " + e.getFirstName() + ",\n\nAn AllianceTel Enterprise account was created for you. You'll sign in with "
-                        + "this email: " + e.getEmail() + "\n\nChoose your password here:\n" + link
+                        + (e.getEmail() != null ? "this email: " + e.getEmail() : "this phone number: " + e.getPhone())
+                        + "\n\nChoose your password here:\n" + link
                         + "\n\nThe link works once and expires in " + validFor + ". If you didn't expect this, contact your manager."
                 : "Hi " + e.getFirstName() + ",\n\nYour AllianceTel password was reset. Choose a new one here:\n" + link
                         + "\n\nThe link works once and expires in " + validFor + ". If you didn't ask for this, tell your manager.";

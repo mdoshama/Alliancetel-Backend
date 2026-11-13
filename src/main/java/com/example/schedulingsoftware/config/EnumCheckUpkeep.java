@@ -56,6 +56,7 @@ public class EnumCheckUpkeep implements ApplicationRunner {
         if (!isPostgres()) {
             return;
         }
+        relaxNotNull();
         for (EnumColumn c : COLUMNS) {
             String name = c.table() + "_" + c.column() + "_check";
             String allowed = Arrays.stream(c.type().getEnumConstants())
@@ -73,6 +74,24 @@ public class EnumCheckUpkeep implements ApplicationRunner {
             jdbc.execute("ALTER TABLE " + c.table() + " DROP CONSTRAINT IF EXISTS " + name);
             jdbc.execute("ALTER TABLE " + c.table() + " ADD CONSTRAINT " + name + " " + wanted);
             log.info("Updated {} to allow {}", name, allowed);
+        }
+    }
+
+    /**
+     * Columns that became optional: the schema updater adds columns but never drops NOT NULL, so it's done here once.
+     * employees.email: people can sign in with their phone number instead.
+     */
+    static final List<String[]> NOW_OPTIONAL = List.<String[]>of(new String[] { "employees", "email" });
+
+    private void relaxNotNull() {
+        for (String[] tc : NOW_OPTIONAL) {
+            List<String> nullable = jdbc.queryForList("select is_nullable from information_schema.columns "
+                    + "where table_schema = current_schema() and table_name = ? and column_name = ?", String.class,
+                    tc[0], tc[1]);
+            if (!nullable.isEmpty() && "NO".equals(nullable.getFirst())) {
+                jdbc.execute("ALTER TABLE " + tc[0] + " ALTER COLUMN " + tc[1] + " DROP NOT NULL");
+                log.info("{}.{} is now optional", tc[0], tc[1]);
+            }
         }
     }
 

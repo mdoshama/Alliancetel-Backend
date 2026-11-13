@@ -150,7 +150,7 @@ public class DemoDataSeeder implements ApplicationRunner {
     /** Sample accounts created before logins existed get the demo password too. */
     private void enableDemoLogins(String hash) {
         List<Employee> demo = employeeRepository.findAll().stream()
-                .filter(e -> e.getEmail().endsWith(DEMO_DOMAIN))
+                .filter(e -> e.getEmail() != null && e.getEmail().endsWith(DEMO_DOMAIN))
                 .toList();
         demo.stream().filter(e -> e.getPasswordHash() == null).forEach(e -> e.setPasswordHash(hash));
         demo.stream()

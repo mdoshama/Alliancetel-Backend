@@ -45,7 +45,8 @@ public class Employee {
     @Column(nullable = false, length = 60)
     private String lastName;
 
-    @Column(nullable = false, unique = true, length = 120)
+    /** Optional: someone can sign in with their phone number instead (one of the two is needed). */
+    @Column(unique = true, length = 120)
     private String email;
 
     @Column(length = 30)

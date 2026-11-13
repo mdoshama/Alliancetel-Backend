@@ -20,7 +20,8 @@ public final class EmployeeDtos {
             @NotBlank @Size(max = 20) @Pattern(regexp = InputRules.CODE, message = InputRules.CODE_MSG) String employeeCode,
             @NotBlank @Size(max = 60) @Pattern(regexp = InputRules.PERSON_NAME, message = InputRules.PERSON_NAME_MSG) String firstName,
             @NotBlank @Size(max = 60) @Pattern(regexp = InputRules.PERSON_NAME, message = InputRules.PERSON_NAME_MSG) String lastName,
-            @NotBlank @Size(max = 120) @Pattern(regexp = InputRules.EMAIL, message = InputRules.EMAIL_MSG) String email,
+            /** Optional when there's a phone number (they can sign in with either). */
+            @Size(max = 120) @Pattern(regexp = InputRules.EMAIL, message = InputRules.EMAIL_MSG) String email,
             /** Any common format; saved in international form (+16195550142). */
             @Size(max = 30) @Pattern(regexp = InputRules.PHONE_CHARS, message = InputRules.PHONE_CHARS_MSG) String phone,
             @NotNull Role role,

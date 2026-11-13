@@ -139,6 +139,21 @@ public class EmployeeService {
         return create(request, false);
     }
 
+    /** The email in lower case, or null when none was given. */
+    private static String emailOf(EmployeeRequest request) {
+        String email = request.email() == null ? "" : request.email().trim().toLowerCase(Locale.ROOT);
+        return email.isEmpty() ? null : email;
+    }
+
+    /** Someone signs in with their email or their phone number: one of them is needed. @return the phone, normalized */
+    private static String signInDetails(EmployeeRequest request, String email) {
+        String phone = PhoneNumbers.normalize(request.phone());
+        if (email == null && phone == null) {
+            throw new BusinessRuleException("Add an email or a phone number: they sign in with one of them.");
+        }
+        return phone;
+    }
+
     /**
      * Creates the account with a temporary password and emails them a link to choose their own (also by text when
      * {@code textLink}: the admin confirms they agreed to get it by text).
@@ -146,12 +161,17 @@ public class EmployeeService {
     @Transactional
     public CredentialsResponse create(EmployeeRequest request, boolean textLink) {
         String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
-        String email = request.email().trim().toLowerCase(Locale.ROOT);
+        String email = emailOf(request);
+        String phone = signInDetails(request, email);
         if (employeeRepository.existsByEmployeeCodeIgnoreCase(code)) {
             throw new BusinessRuleException("NTID '" + code + "' is already in use.");
         }
-        if (employeeRepository.existsByEmailIgnoreCase(email)) {
+        if (email != null && employeeRepository.existsByEmailIgnoreCase(email)) {
             throw new BusinessRuleException("Email '" + email + "' is already in use.");
+        }
+        if (phone != null && employeeRepository.existsByPhone(phone)) {
+            throw new BusinessRuleException("Phone " + request.phone().trim() + " is already used by someone else. "
+                    + "People sign in with it, so each phone number can belong to one person only.");
         }
         Employee employee = new Employee();
         apply(employee, request, code, email);
@@ -170,12 +190,18 @@ public class EmployeeService {
     public EmployeeResponse update(Long id, EmployeeRequest request) {
         Employee employee = getEmployee(id);
         String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
-        String email = request.email().trim().toLowerCase(Locale.ROOT);
+        String email = emailOf(request);
+        String phone = signInDetails(request, email);
         if (employeeRepository.existsByEmployeeCodeIgnoreCaseAndIdNot(code, id)) {
             throw new BusinessRuleException("NTID '" + code + "' is already in use.");
         }
-        if (employeeRepository.existsByEmailIgnoreCaseAndIdNot(email, id)) {
+        if (email != null && employeeRepository.existsByEmailIgnoreCaseAndIdNot(email, id)) {
             throw new BusinessRuleException("Email '" + email + "' is already in use.");
+        }
+        // Checked only when the number changes, so older records that share one can still be edited.
+        if (phone != null && !phone.equals(employee.getPhone()) && employeeRepository.existsByPhoneAndIdNot(phone, id)) {
+            throw new BusinessRuleException("Phone " + request.phone().trim() + " is already used by someone else. "
+                    + "People sign in with it, so each phone number can belong to one person only.");
         }
         boolean textsBefore = employee.isSmsOptIn();
         apply(employee, request, code, email);
@@ -350,7 +376,9 @@ public class EmployeeService {
         }
         // A change of role, email or access ends their current sessions, so it takes effect everywhere at once.
         boolean endSessions = employee.getId() != null && (employee.getRole() != request.role()
-                || !email.equalsIgnoreCase(employee.getEmail())
+                || !java.util.Objects.equals(email, employee.getEmail())
+                || (employee.getPhone() != null && !java.util.Objects.equals(PhoneNumbers.normalize(request.phone()),
+                        employee.getPhone()))
                 || (Boolean.FALSE.equals(request.active()) && employee.isActive()));
         employee.setEmployeeCode(code);
         employee.setFirstName(InputRules.clean(request.firstName()));

@@ -2,6 +2,7 @@ package com.example.schedulingsoftware.auth;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -58,7 +59,7 @@ public class AuthService {
     @Transactional
     public LoginResponse login(String email, String password, String clientIp) {
         loginAttempts.checkAllowed(email, clientIp);
-        Employee e = employeeRepository.findByEmailIgnoreCase(email.trim().toLowerCase(Locale.ROOT)).orElse(null);
+        Employee e = findForSignIn(email, password);
         boolean matches = passwordEncoder.matches(password,
                 e == null || e.getPasswordHash() == null ? dummyHash : e.getPasswordHash());
         if (e == null || !e.isActive() || e.getPasswordHash() == null || !matches) {
@@ -79,6 +80,33 @@ public class AuthService {
         e.setLastLoginAt(Instant.now());
         log.info("Signed in: {} from {}", e.getEmail(), clientIp);
         return issue(e);
+    }
+
+    /**
+     * The account for what was typed in the sign-in box: an email (it has an @) or a phone number in any usual form
+     * ("(619) 555-0142", "+1 619 555 0142"). If older records share a phone number, the active one whose password
+     * matches is taken.
+     */
+    private Employee findForSignIn(String login, String password) {
+        String typed = login.trim();
+        if (typed.contains("@")) {
+            return employeeRepository.findByEmailIgnoreCase(typed.toLowerCase(Locale.ROOT)).orElse(null);
+        }
+        String phone;
+        try {
+            phone = com.example.schedulingsoftware.common.PhoneNumbers.normalize(typed);
+        } catch (RuntimeException notAPhone) {
+            return null;
+        }
+        if (phone == null) {
+            return null;
+        }
+        List<Employee> found = employeeRepository.findByPhone(phone).stream().filter(Employee::isActive).toList();
+        if (found.size() <= 1) {
+            return found.isEmpty() ? null : found.getFirst();
+        }
+        return found.stream().filter(x -> x.getPasswordHash() != null
+                && passwordEncoder.matches(password, x.getPasswordHash())).findFirst().orElse(null);
     }
 
     @Transactional(readOnly = true)
@@ -189,7 +217,10 @@ public class AuthService {
     @Transactional(readOnly = true)
     public AuthDtos.SetupLinkInfo setupLinkInfo(String token, String clientIp) {
         PasswordSetupToken t = checkLink(token, clientIp);
-        return new AuthDtos.SetupLinkInfo(t.getEmployee().getFirstName(), t.getEmployee().getEmail(), t.isNewAccount());
+        // What they'll sign in with: their email, or their phone number when they have no email.
+        var who = t.getEmployee();
+        return new AuthDtos.SetupLinkInfo(who.getFirstName(), who.getEmail() != null ? who.getEmail() : who.getPhone(),
+                t.isNewAccount());
     }
 
     /**

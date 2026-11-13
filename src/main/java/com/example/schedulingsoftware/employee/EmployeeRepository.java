@@ -24,6 +24,13 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
 
     Optional<Employee> findByEmailIgnoreCase(String email);
 
+    /** By phone number in +&lt;country&gt;&lt;number&gt; form (as saved). */
+    java.util.List<Employee> findByPhone(String phone);
+
+    boolean existsByPhone(String phone);
+
+    boolean existsByPhoneAndIdNot(String phone, Long id);
+
     Optional<Employee> findFirstByRoleAndActiveTrueOrderByIdAsc(Role role);
 
     boolean existsByRoleAndActiveTrueAndPasswordHashIsNotNull(Role role);
