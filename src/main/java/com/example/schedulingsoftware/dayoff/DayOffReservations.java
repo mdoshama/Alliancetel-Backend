@@ -111,6 +111,7 @@ public class DayOffReservations {
             r.setStatus(DayOffStatus.PENDING);
             r.setReviewedAt(null);
             r.setReviewNote(null);
+            r.setReviewedBy(null);
             repository.flush();
             scheduleService.revokeApprovedDayOff(e, r.getOffDate());
             n++;

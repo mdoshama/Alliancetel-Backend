@@ -86,6 +86,13 @@ public class DayOffRequest {
 
     private Instant reviewedAt;
 
+    /** Who decided: a manager's or admin's name, or {@link #SYSTEM} when it was given (or not) automatically. */
+    @Column(length = 120)
+    private String reviewedBy;
+
+    /** {@link #reviewedBy} when the system decided. */
+    public static final String SYSTEM = "System";
+
     /** Set when a manager or admin changed the decision after it was made: what it was before, who, when and why. */
     @Enumerated(EnumType.STRING)
     @Column(length = 20)

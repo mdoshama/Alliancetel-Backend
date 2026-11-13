@@ -1,6 +1,7 @@
 package com.example.schedulingsoftware.dayoff;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -313,6 +314,31 @@ class SixDayWorkerRulesTest {
                 .filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
         assertEquals(1, row.days().stream().filter(x -> !x.type().name().equals("WORK")).count(),
                 "one day off on the schedule: the emergency");
+    }
+
+    @Test
+    void everyRequestSaysWhenItWasSentAndWhoDecided() {
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        var auto = dayOffService.create(new CreateDayOffRequest(anna, List.of(week.plusDays(1)), null, null)).getFirst();
+        assertNotNull(auto.createdAt());
+        assertEquals(DayOffRequest.SYSTEM, auto.reviewedBy(), "given automatically");
+        // Ben's day is taken by Anna at the same store, so his is an emergency for a manager.
+        TestUsers.signInAs(ben, Role.EMPLOYEE, area);
+        var urgent = dayOffService.create(new CreateDayOffRequest(ben, List.of(week.plusDays(1)), "Sick", true)).getFirst();
+        assertNull(urgent.reviewedBy(), "nobody decided yet");
+        TestUsers.signInAsAdmin();
+        var decided = dayOffService.approve(urgent.id(), "OK");
+        assertNotNull(decided.reviewedBy());
+        assertTrue(!decided.reviewedBy().equals(DayOffRequest.SYSTEM), decided.reviewedBy());
+        // Saved before who decided was recorded: worked out from the note.
+        DayOffRequest old = new DayOffRequest();
+        old.setEmployee(employeeService.getEmployee(anna));
+        old.setOffDate(week.plusDays(4));
+        old.setStatus(DayOffStatus.APPROVED);
+        old.setReviewNote("Given by Maria Garcia.");
+        assertEquals("Maria Garcia", DayOffDtos.DayOffResponse.from(old).reviewedBy());
+        old.setReviewNote(DayOffService.AUTO_NOTE);
+        assertEquals(DayOffRequest.SYSTEM, DayOffDtos.DayOffResponse.from(old).reviewedBy());
     }
 
     @Test

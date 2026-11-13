@@ -400,6 +400,7 @@ public class DayOffService {
             } else {
                 r.setReviewNote("Not given: " + why);
                 r.setReviewedAt(Instant.now());
+                r.setReviewedBy(DayOffRequest.SYSTEM);
                 notifier.dayOffDecided(r, false, r.getReviewNote());
             }
             repository.flush();
@@ -739,6 +740,7 @@ public class DayOffService {
                 r.setRegular(false);
                 r.setStatus(DayOffStatus.PENDING);
                 r.setReviewedAt(null);
+                r.setReviewedBy(null);
                 r.setReviewNote(MOVED_NOTE + user.fullName() + ": "
                         + r.getEmployee().getFirstName() + " already had " + x.kept().size() + " day"
                         + (x.kept().size() == 1 ? "" : "s") + " off that week.");
@@ -998,6 +1000,7 @@ public class DayOffService {
     private DayOffResponse grantAutomatically(DayOffRequest r, String note) {
         r.setStatus(DayOffStatus.APPROVED);
         r.setReviewNote(note);
+        r.setReviewedBy(DayOffRequest.SYSTEM);
         r.setReviewedAt(Instant.now());
         String update = grant(r, false);
         return DayOffResponse.from(r).withScheduleUpdate(update);
@@ -1136,6 +1139,7 @@ public class DayOffService {
         }
         r.setPreviousStatus(old);
         r.setStatus(newStatus);
+        r.setReviewedBy(user.fullName());
         r.setDecisionChangedBy(user.fullName());
         r.setDecisionChangeReason(why);
         r.setDecisionChangedAt(Instant.now());
@@ -1188,6 +1192,7 @@ public class DayOffService {
         }
         r.setStatus(newStatus);
         r.setReviewNote(InputRules.clean(note));
+        r.setReviewedBy(accessPolicy.current().fullName());
         r.setReviewedAt(Instant.now());
         return DayOffResponse.from(r);
     }

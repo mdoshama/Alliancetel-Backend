@@ -153,18 +153,42 @@ public final class DayOffDtos {
              * the one the system gave them, days they asked for, other emergencies), so the whole week is in view.
              * Null otherwise.
              */
-            List<WeekDayOff> weekDaysOff) {
+            List<WeekDayOff> weekDaysOff,
+            /** Who decided: a manager's or admin's name, "System" when it was automatic, null while waiting. */
+            String reviewedBy) {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, update, reserved, regular, weekDaysOff);
+                    decisionChangeReason, decisionChangedAt, update, reserved, regular, weekDaysOff, reviewedBy);
         }
 
         public DayOffResponse withWeekDaysOff(List<WeekDayOff> days) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, scheduleUpdate, reserved, regular, days);
+                    decisionChangeReason, decisionChangedAt, scheduleUpdate, reserved, regular, days, reviewedBy);
+        }
+
+        /**
+         * Who decided a request saved before that was recorded, worked out from its note: automatic approvals say
+         * "Given automatically …" or "… by the system", a manager's direct approval "Given by Name.".
+         */
+        static String reviewerOf(DayOffRequest r) {
+            if (r.getReviewedBy() != null) {
+                return r.getDecisionChangedBy() != null ? r.getDecisionChangedBy() : r.getReviewedBy();
+            }
+            if (r.getDecisionChangedBy() != null) {
+                return r.getDecisionChangedBy();
+            }
+            if (r.getStatus() == DayOffStatus.PENDING) {
+                return null;
+            }
+            String note = r.getReviewNote() == null ? "" : r.getReviewNote();
+            if (note.startsWith("Given automatically") || note.contains("by the system") || note.startsWith("Not given:")) {
+                return DayOffRequest.SYSTEM;
+            }
+            var m = java.util.regex.Pattern.compile("^Given by (.+?)\\.$").matcher(note);
+            return m.matches() ? m.group(1) : null;
         }
 
         public static DayOffResponse from(DayOffRequest r) {
@@ -191,7 +215,8 @@ public final class DayOffDtos {
                     null,
                     r.isReserved(),
                     r.isRegular(),
-                    null);
+                    null,
+                    reviewerOf(r));
         }
     }
 

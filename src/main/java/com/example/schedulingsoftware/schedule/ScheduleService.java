@@ -635,6 +635,7 @@ public class ScheduleService {
                     r.setReviewNote(r.isRegular() ? "Regular day off, given by the system."
                             : "Given by the system (no day was asked for).");
                     r.setReviewedAt(now);
+                    r.setReviewedBy(DayOffRequest.SYSTEM);
                 }
             }
         }
