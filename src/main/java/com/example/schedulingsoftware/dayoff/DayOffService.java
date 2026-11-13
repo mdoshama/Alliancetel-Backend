@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Sort;
@@ -307,14 +306,6 @@ public class DayOffService {
         if (!emergency && !override) {
             int limit = normalDaysOffPerWeek(employee);
             requestedPerWeek.forEach((monday, count) -> {
-                List<DayOffRequest> fixed = fixedDaysOff(employee, monday);
-                if (!fixed.isEmpty() && fixed.size() + count > limit) {
-                    String days = fixed.stream().map(r -> dayName(r.getOffDate())).collect(Collectors.joining(", "));
-                    throw new BusinessRuleException("The week of " + shortDate(monday) + " is already published with "
-                            + employee.getFirstName() + " off on " + days + ". " + employee.getFirstName() + " works "
-                            + employee.getWorkDaysPerWeek() + " days a week, so another day off that week needs an "
-                            + "emergency request.");
-                }
                 long existing = usedNormalDays(employee, monday);
                 if (existing + count > limit) {
                     throw new BusinessRuleException(employee.getFullName() + " works " + employee.getWorkDaysPerWeek()
@@ -669,23 +660,12 @@ public class DayOffService {
     }
 
     /**
-     * Their normal days off that week: the ones they asked for (not emergencies), plus, once the week's schedule is
-     * published, the days the schedule already gives them (regular or picked by the system). Before publishing those
-     * are swapped for a day they pick; after, they stay, so picking another day would be a second day off.
+     * Their normal days off that week: the ones they asked for (not emergencies). Days the system holds for them
+     * (regular or picked) don't count: a day they choose swaps with them, on a published week too.
      */
     private long usedNormalDays(Employee employee, LocalDate monday) {
         return repository.countByEmployeeIdAndOffDateBetweenAndStatusInAndEmergencyFalseAndReservedFalse(
-                employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES) + fixedDaysOff(employee, monday).size();
-    }
-
-    /** Days the published schedule already gives them that week (regular or picked by the system); none before. */
-    private List<DayOffRequest> fixedDaysOff(Employee employee, LocalDate monday) {
-        if (employee.getArea() == null || !reservations.published(employee.getArea().getId(), monday)) {
-            return List.of();
-        }
-        return repository.findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(employee.getId(), monday,
-                monday.plusDays(6)).stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED)
-                .sorted(java.util.Comparator.comparing(DayOffRequest::getOffDate)).toList();
+                employee.getId(), monday, monday.plusDays(6), OPEN_STATUSES);
     }
 
     /** Every date in the area's published weeks between from and to (about 8 weeks either side of today if open). */
