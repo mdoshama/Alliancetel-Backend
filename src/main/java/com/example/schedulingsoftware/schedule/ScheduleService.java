@@ -676,9 +676,14 @@ public class ScheduleService {
                 .filter(Employee::worksShifts).toList();
         Coverage coverage = Coverage.of(storeRepository.findByAreaIdOrderByNameAsc(areaId), staff);
         Map<Long, String> asked = new LinkedHashMap<>();
+        boolean weekPublished = scheduleRepository.findByAreaIdAndWeekStart(areaId, DayOffService.weekStart(date))
+                .map(w -> w.getStatus() == ScheduleStatus.PUBLISHED).orElse(false);
+        // People whose day off that date is only the system's pick: it moves if this person takes the day.
+        Set<Long> canMove = new HashSet<>();
         for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, date, openStatuses)) {
             Employee e = r.getEmployee();
-            if (reservedCanMove && r.isMovable()) {
+            if (reservedCanMove && r.isMovable(weekPublished)) {
+                canMove.add(e.getId());
                 continue;
             }
             if (e.worksShifts() && !e.getId().equals(employee.getId())) {
@@ -699,7 +704,9 @@ public class ScheduleService {
                         List.of());
             }
             // Others the schedule already has off that day.
+            // (A day off the schedule shows only because the system picked it doesn't count: it can move.)
             day.stream().filter(en -> en.getType() != DayType.WORK && !en.getEmployee().getId().equals(employee.getId()))
+                    .filter(en -> !canMove.contains(en.getEmployee().getId()))
                     .forEach(en -> off.add(en.getEmployee().getId()));
         }
         Set<Long> withMe = new HashSet<>(off);

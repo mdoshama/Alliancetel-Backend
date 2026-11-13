@@ -360,7 +360,7 @@ public class DayOffService {
         if (employee.getHomeStore() != null) {
             DayOffRequest real = repository.findSameStore(employee.getHomeStore().getId(), employee.getId(),
                     dates.first(), dates.last(), OPEN_STATUSES).stream()
-                    .filter(r -> dates.contains(r.getOffDate()) && !r.isMovable())
+                    .filter(r -> dates.contains(r.getOffDate()) && !movable(r))
                     .findFirst().orElse(null);
             if (real != null) {
                 return real.getEmployee().getFirstName() + " already has " + dayName(real.getOffDate()) + " off at "
@@ -433,10 +433,23 @@ public class DayOffService {
         if (area == null) {
             return List.of();
         }
-        // Only ones nobody approved yet can move; a reserved day a manager approved stays.
-        return repository.findForAreaOnDate(area, date, List.of(DayOffStatus.PENDING)).stream()
-                .filter(r -> r.isMovable() && !r.getEmployee().getId().equals(employee.getId()))
+        // Days the system picked (waiting, or given by the system at generate) can move; a day a manager or admin
+        // approved by hand stays.
+        return repository.findForAreaOnDate(area, date, List.of(DayOffStatus.PENDING, DayOffStatus.APPROVED)).stream()
+                .filter(r -> movable(r) && !r.getEmployee().getId().equals(employee.getId()))
                 .toList();
+    }
+
+    /**
+     * Whether a day the system picked can still give way to someone's own request: yes while it waits, and also once
+     * the system gave it at generate, unless that week is already published (see {@link DayOffRequest#isMovable}).
+     */
+    private boolean movable(DayOffRequest r) {
+        if (!r.isMovable()) {
+            return false;
+        }
+        return r.getStatus() == DayOffStatus.PENDING
+                || !reservations.published(areaOf(r.getEmployee()), weekStart(r.getOffDate()));
     }
 
     /**
@@ -968,7 +981,7 @@ public class DayOffService {
         // A colleague's reserved day isn't shown as taken: asking for it moves their reservation to another day.
         return repository.findSameStore(employee.getHomeStore().getId(), employee.getId(), from, to, OPEN_STATUSES)
                 .stream()
-                .filter(r -> !r.isMovable())
+                .filter(r -> !movable(r))
                 .map(r -> new TakenDay(r.getOffDate(), r.getEmployee().getFirstName(), r.getStatus()))
                 .toList();
     }
@@ -1021,7 +1034,7 @@ public class DayOffService {
         List<DayOffRequest> aside = new ArrayList<>();
         if (e.getHomeStore() != null) {
             repository.findSameStore(e.getHomeStore().getId(), e.getId(), date, date, OPEN_STATUSES).stream()
-                    .filter(DayOffRequest::isMovable).forEach(aside::add);
+                    .filter(this::movable).forEach(aside::add);
         }
         aside.forEach(reservations::moveAside);
         for (DayOffRequest other : reservedOthersOn(e, date)) {

@@ -74,11 +74,32 @@ public class DayOffRequest {
     private DayOffStatus status = DayOffStatus.PENDING;
 
     /**
-     * Only held by the system and still waiting, so it can give way to someone's real request. A regular day off is
-     * never movable: it is that person's standing day.
+     * A day the system picked for someone who didn't ask, so it gives way to a colleague's real request (the system
+     * then picks another day for them). That holds while it's still waiting and also once the system gave it when the
+     * week was generated, as long as nobody decided on it by hand. A regular day off is never movable: it is that
+     * person's standing day. Same as {@link #isMovable(boolean)} for a week that isn't published.
      */
     public boolean isMovable() {
-        return reserved && !regular && status == DayOffStatus.PENDING;
+        return isMovable(false);
+    }
+
+    /**
+     * @param weekPublished whether that week's schedule is published: a published week keeps the days it was
+     *                      published with, so only a day still waiting can move there
+     */
+    public boolean isMovable(boolean weekPublished) {
+        if (!reserved || regular) {
+            return false;
+        }
+        if (status == DayOffStatus.PENDING) {
+            return true;
+        }
+        return !weekPublished && isGivenBySystem();
+    }
+
+    /** Approved by the system itself (at generate), not by a manager or admin, and never changed by hand since. */
+    public boolean isGivenBySystem() {
+        return status == DayOffStatus.APPROVED && SYSTEM.equals(reviewedBy) && decisionChangedAt == null;
     }
 
     @Column(length = 255)

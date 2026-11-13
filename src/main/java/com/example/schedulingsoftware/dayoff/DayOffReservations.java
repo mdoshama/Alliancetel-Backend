@@ -179,9 +179,14 @@ public class DayOffReservations {
         if (!misplaced.isEmpty()) {
             repository.deleteAll(misplaced);
             repository.flush();
+            // Ones already given on a draft schedule become work days there again (they get a better day below).
+            misplaced.stream().filter(r -> r.getStatus() == DayOffStatus.APPROVED)
+                    .forEach(r -> scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate()));
             log.info("Moved {} day(s) off the system picked on short days (area {}, week of {})", misplaced.size(),
                     areaId, weekStart);
         }
+        boolean draftMade = scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
+                .map(w -> w.getStatus() == ScheduleStatus.DRAFT).orElse(false);
         for (WeekRequests.Suggestion s : weekRequests.suggestFor(areaId, weekStart)) {
             // Only future days, and never twice on the same date.
             LocalDate date = s.options().stream().filter(d -> d.isAfter(today)).findFirst().orElse(null);
@@ -196,6 +201,16 @@ public class DayOffReservations {
             // Only reserved: it waits for a manager or admin like any request (nothing is approved automatically).
             r.setStatus(DayOffStatus.PENDING);
             repository.save(r);
+            if (draftMade) {
+                // The week's draft is already made (e.g. their day gave way to a colleague's request): give the new
+                // day now, the way generating does, so they're never left without one on the schedule.
+                r.setStatus(DayOffStatus.APPROVED);
+                r.setReviewNote("Given by the system (no day was asked for).");
+                r.setReviewedAt(Instant.now());
+                r.setReviewedBy(DayOffRequest.SYSTEM);
+                repository.flush();
+                scheduleService.applyApprovedDayOff(r.getEmployee(), date);
+            }
             n++;
         }
         return n;
