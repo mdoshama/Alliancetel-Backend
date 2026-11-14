@@ -14,14 +14,37 @@ public record CurrentUser(
         String fullName,
         Role role,
         Long areaId,
-        boolean mustChangePassword) {
+        boolean mustChangePassword,
+        /** Areas this person manages: their own for a manager, the assigned ones (and their own) for a Market Manager. */
+        java.util.Set<Long> managedAreaIds) {
+
+    public CurrentUser {
+        managedAreaIds = managedAreaIds == null ? java.util.Set.of() : java.util.Set.copyOf(managedAreaIds);
+    }
+
+    /** Managers manage their own area. */
+    public CurrentUser(Long id, String email, String fullName, Role role, Long areaId, boolean mustChangePassword) {
+        this(id, email, fullName, role, areaId, mustChangePassword,
+                (role == Role.MANAGER || role == Role.MARKET_MANAGER) && areaId != null ? java.util.Set.of(areaId)
+                        : java.util.Set.of());
+    }
 
     public boolean isAdmin() {
         return role == Role.ADMIN;
     }
 
+    /** A manager of either kind: of one area, or a Market Manager of several. */
     public boolean isManager() {
-        return role == Role.MANAGER;
+        return role == Role.MANAGER || role == Role.MARKET_MANAGER;
+    }
+
+    public boolean isMarketManager() {
+        return role == Role.MARKET_MANAGER;
+    }
+
+    /** Admins manage every area; managers the areas they were given. */
+    public boolean manages(Long area) {
+        return isAdmin() || (isManager() && area != null && managedAreaIds.contains(area));
     }
 
     public boolean isEmployee() {

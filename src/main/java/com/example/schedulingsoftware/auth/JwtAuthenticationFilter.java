@@ -54,7 +54,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 e.getFullName(),
                 e.getRole(),
                 e.getArea() == null ? null : e.getArea().getId(),
-                e.isMustChangePassword());
+                e.isMustChangePassword(),
+                e.isManagerRole() ? employeeRepository.managedAreaIdsOf(e.getId(), e.getRole()) : java.util.Set.of());
         var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + e.getRole().name()));
         var auth = new UsernamePasswordAuthenticationToken(user, null, authorities);
         // Kept so "sign out" can end exactly this token.

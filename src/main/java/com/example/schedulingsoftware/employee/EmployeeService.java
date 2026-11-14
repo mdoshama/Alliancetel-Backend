@@ -262,6 +262,34 @@ public class EmployeeService {
     }
 
     /**
+     * Admins: the areas a Market Manager manages, besides their home area (which they always manage). It applies on
+     * their next request (the signed-in user is loaded fresh each time).
+     */
+    @Transactional
+    public EmployeeResponse setManagedAreas(Long id, java.util.List<Long> areaIds) {
+        if (!accessPolicy.current().isAdmin()) {
+            throw new org.springframework.security.access.AccessDeniedException("Only an admin can assign areas.");
+        }
+        Employee employee = getEmployee(id);
+        if (employee.getRole() != Role.MARKET_MANAGER) {
+            throw new BusinessRuleException(employee.getFullName() + " isn't a Market Manager, so there are no areas "
+                    + "to assign. Change their role first.");
+        }
+        java.util.Set<com.example.schedulingsoftware.area.Area> areas = new java.util.HashSet<>();
+        for (Long areaId : new java.util.LinkedHashSet<>(areaIds)) {
+            if (employee.getArea() != null && employee.getArea().getId().equals(areaId)) {
+                continue;
+            }
+            areas.add(areaService.getArea(areaId));
+        }
+        employee.getManagedAreas().clear();
+        employee.getManagedAreas().addAll(areas);
+        employeeRepository.flush();
+        log.info("{} now manages {} area(s) besides their own", employee.getEmail(), areas.size());
+        return EmployeeResponse.from(employee);
+    }
+
+    /**
      * Sets how many days a week someone works (admins, and managers for the people in their area). Regular days off
      * beyond what the new number allows are dropped, latest in the week first.
      */
@@ -377,8 +405,10 @@ public class EmployeeService {
         // shouldn't fail because of that).
         boolean alreadyPrimaryHere = employee.getId() != null && employee.isActive() && employee.isPrimaryAtStore()
                 && employee.getHomeStore() != null && employee.getHomeStore().getId().equals(request.homeStoreId());
-        if ((request.role() == Role.MANAGER || request.role() == Role.EMPLOYEE) && request.areaId() == null) {
-            throw new BusinessRuleException("Managers and employees must be assigned to an area.");
+        if ((request.role() == Role.MANAGER || request.role() == Role.MARKET_MANAGER || request.role() == Role.EMPLOYEE)
+                && request.areaId() == null) {
+            throw new BusinessRuleException("Managers and employees must be assigned to an area (a Market Manager's "
+                    + "home area).");
         }
         if (employee.getId() != null && employee.getId().equals(accessPolicy.current().id())
                 && (request.role() != Role.ADMIN || Boolean.FALSE.equals(request.active()))) {
@@ -420,6 +450,10 @@ public class EmployeeService {
             }
         }
         employee.setRole(request.role());
+        if (request.role() != Role.MARKET_MANAGER) {
+            // Only Market Managers manage areas besides their own.
+            employee.getManagedAreas().clear();
+        }
         employee.setArea(request.areaId() == null ? null : areaService.getArea(request.areaId()));
         employee.setHomeStore(request.homeStoreId() == null ? null
                 : storeService.requireAssignable(request.homeStoreId(), request.areaId()));
@@ -432,7 +466,7 @@ public class EmployeeService {
         employee.setWorkDaysPerWeek(request.workDaysPerWeek());
         // Only managers can be off the schedule (managing without working shifts); everyone else works.
         boolean wasOnSchedule = employee.isOnSchedule();
-        if (request.role() != Role.MANAGER) {
+        if (request.role() != Role.MANAGER && request.role() != Role.MARKET_MANAGER) {
             employee.setOnSchedule(true);
         } else if (request.onSchedule() != null) {
             employee.setOnSchedule(request.onSchedule());

@@ -82,14 +82,15 @@ public class BirthdayReminders {
         }
         java.time.Instant startOfDay = today.atStartOfDay(zone).toInstant();
         int queued = 0;
-        for (Employee to : employeeRepository.findByActiveTrueAndRoleIn(EnumSet.of(Role.ADMIN, Role.MANAGER))) {
+        for (Employee to : employeeRepository.findByActiveTrueAndRoleIn(EnumSet.of(Role.ADMIN, Role.MANAGER,
+                Role.MARKET_MANAGER))) {
             if (to.getEmail() == null) {
                 continue;
             }
-            Long areaId = to.getArea() == null ? null : to.getArea().getId();
+            java.util.Set<Long> areas = to.managedAreaIds();
             List<UpcomingBirthday> theirs = due.stream()
                     .filter(b -> !b.employeeId().equals(to.getId()))
-                    .filter(b -> to.getRole() == Role.ADMIN || (areaId != null && areaId.equals(b.areaId())))
+                    .filter(b -> to.getRole() == Role.ADMIN || (b.areaId() != null && areas.contains(b.areaId())))
                     .toList();
             if (theirs.isEmpty() || repository.existsByEmployee_IdAndKindAndCreatedAtGreaterThanEqual(to.getId(),
                     NotificationKind.BIRTHDAY_REMINDER, startOfDay)) {

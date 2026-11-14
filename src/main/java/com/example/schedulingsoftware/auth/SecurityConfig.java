@@ -37,6 +37,7 @@ public class SecurityConfig {
 
     private static final String ADMIN = "ADMIN";
     private static final String MANAGER = "MANAGER";
+    private static final String MARKET_MANAGER = "MARKET_MANAGER";
     private static final String BACK_OFFICE = "BACK_OFFICE";
 
     private final JwtService jwtService;
@@ -77,27 +78,27 @@ public class SecurityConfig {
                         .requestMatchers("/api/areas/**").hasRole(ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/stores/**").authenticated()
                         .requestMatchers("/api/stores/**").hasRole(ADMIN)
-                        .requestMatchers(HttpMethod.GET, "/api/employees/**").hasAnyRole(ADMIN, MANAGER)
+                        .requestMatchers(HttpMethod.GET, "/api/employees/**").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
                         // Managers rotate their own staff between stores.
-                        .requestMatchers(HttpMethod.PATCH, "/api/employees/*/home-store").hasAnyRole(ADMIN, MANAGER)
-                        .requestMatchers(HttpMethod.PUT, "/api/employees/*/regular-days-off").hasAnyRole(ADMIN, MANAGER)
-                        .requestMatchers(HttpMethod.PUT, "/api/employees/*/work-days").hasAnyRole(ADMIN, MANAGER)
+                        .requestMatchers(HttpMethod.PATCH, "/api/employees/*/home-store").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
+                        .requestMatchers(HttpMethod.PUT, "/api/employees/*/regular-days-off").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
+                        .requestMatchers(HttpMethod.PUT, "/api/employees/*/work-days").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
                         .requestMatchers("/api/employees/**").hasRole(ADMIN)
 
                         // Everyone can request days off; only managers and admins decide on them.
                         .requestMatchers("/api/day-off-requests/*/approve", "/api/day-off-requests/*/reject",
                                 "/api/day-off-requests/*/change-decision", "/api/day-off-requests/approve-many")
-                                .hasAnyRole(ADMIN, MANAGER)
+                                .hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
                         .requestMatchers("/api/day-off-requests/**").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/notifications", "/api/notifications/**").hasRole(ADMIN)
-                        .requestMatchers("/api/notifications/**").hasAnyRole(ADMIN, MANAGER)
+                        .requestMatchers("/api/notifications/**").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
 
                         // Time clock: back office (and admins) clock people in and out; managers look at their area.
-                        .requestMatchers("/api/time-clock/**").hasAnyRole(ADMIN, MANAGER, BACK_OFFICE)
+                        .requestMatchers("/api/time-clock/**").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER, BACK_OFFICE)
 
                         // Everyone can read a schedule (employees only once published); managers build them.
                         .requestMatchers(HttpMethod.GET, "/api/schedules/**").authenticated()
-                        .requestMatchers("/api/schedules/**").hasAnyRole(ADMIN, MANAGER)
+                        .requestMatchers("/api/schedules/**").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
 
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
@@ -123,7 +124,7 @@ public class SecurityConfig {
             CorsConfiguration config = new CorsConfiguration();
             config.setAllowedOrigins(origins);
             config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-            config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Client-Id"));
+            config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Client-Id", "X-Area-Id"));
             config.setMaxAge(3600L);
             source.registerCorsConfiguration("/api/**", config);
         }

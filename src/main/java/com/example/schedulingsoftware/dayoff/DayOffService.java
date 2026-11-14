@@ -1091,9 +1091,7 @@ public class DayOffService {
             String why = null;
             if (r.getStatus() != DayOffStatus.PENDING) {
                 why = "Already " + r.getStatus().name().toLowerCase() + ".";
-            } else if (e.getId().equals(user.id())) {
-                why = "Your own request: an admin decides on it.";
-            } else if (!user.isAdmin() && !java.util.Objects.equals(areaOf(e), user.areaId())) {
+            } else if (!user.manages(areaOf(e))) {
                 why = "Not in your area.";
             } else if (onlyIfCovered) {
                 var impact = scheduleService.dayOffImpact(r.getId());
@@ -1129,9 +1127,6 @@ public class DayOffService {
         DayOffRequest r = get(id);
         CurrentUser user = accessPolicy.current();
         accessPolicy.requireManagerOf(areaOf(r.getEmployee()));
-        if (r.getEmployee().getId().equals(user.id()) && !user.isAdmin()) {
-            throw new AccessDeniedException("You cannot change the decision on your own request. An admin can.");
-        }
         String why = InputRules.clean(reason);
         if (why == null) {
             throw new BusinessRuleException("Give a reason for changing the decision.");
@@ -1171,6 +1166,65 @@ public class DayOffService {
         return DayOffResponse.from(r).withScheduleUpdate(update);
     }
 
+    /**
+     * Someone changed their mind: their normal day off moves to another day of the same week. The new day goes through
+     * the same checks as a new request (store covered, one person per store, the request window), so a day that still
+     * has room is given straight away, with no emergency request. If the new day can't be given, nothing changes:
+     * they keep the day they had.
+     */
+    @Transactional
+    public DayOffResponse move(Long id, LocalDate newDate) {
+        DayOffRequest r = get(id);
+        CurrentUser user = accessPolicy.current();
+        Employee e = r.getEmployee();
+        boolean own = e.getId().equals(user.id());
+        if (!own) {
+            if (user.isEmployee()) {
+                throw new AccessDeniedException("You can only change your own days off.");
+            }
+            accessPolicy.requireManagerOf(areaOf(e));
+        }
+        if (newDate == null) {
+            throw new BusinessRuleException("Pick the new day.");
+        }
+        if (r.isEmergency() || r.isReserved()) {
+            throw new BusinessRuleException(r.isEmergency()
+                    ? "An emergency request can't be moved. Withdraw it (while it waits) and ask again."
+                    : "This day was planned for you. To change it, just ask for the day you want.");
+        }
+        if (r.getStatus() == DayOffStatus.REJECTED) {
+            throw new BusinessRuleException("This request was turned down, so there's no day off to move.");
+        }
+        LocalDate old = r.getOffDate();
+        if (old.isBefore(LocalDate.now())) {
+            throw new BusinessRuleException(dayName(old) + " has already passed, so it can't be moved.");
+        }
+        if (newDate.equals(old)) {
+            throw new BusinessRuleException("That's already your day off.");
+        }
+        if (!weekStart(newDate).equals(weekStart(old))) {
+            throw new BusinessRuleException("A day off can only move to another day of the same week.");
+        }
+        // A day that's taken (a colleague at the store) or full stays that way: checked before the old day is given
+        // back, so a refused move never touches the day they have.
+        String why = whyNotCovered(e, new TreeSet<>(List.of(newDate)));
+        if (why != null) {
+            throw new BusinessRuleException(why.replace("For something urgent, send an emergency request.",
+                    "Pick another day, or keep " + dayName(old) + "."));
+        }
+        String reason = r.getReason();
+        boolean wasApproved = r.getStatus() == DayOffStatus.APPROVED;
+        // Give the old day back first, so it doesn't count against the weekly limit. If the new day fails its checks,
+        // the whole change is rolled back and they keep the old day.
+        repository.delete(r);
+        repository.flush();
+        if (wasApproved) {
+            scheduleService.revokeApprovedDayOff(e, old);
+        }
+        List<DayOffResponse> created = create(new CreateDayOffRequest(e.getId(), List.of(newDate), reason, false, null));
+        return created.get(0);
+    }
+
     /** Employees can withdraw a request while it is still pending. */
     @Transactional
     public void cancel(Long id) {
@@ -1196,10 +1250,8 @@ public class DayOffService {
 
     private DayOffResponse review(Long id, DayOffStatus newStatus, String note) {
         DayOffRequest r = get(id);
+        // Managers decide on their own days off too (no admin needed): requireManagerOf covers their own area.
         accessPolicy.requireManagerOf(areaOf(r.getEmployee()));
-        if (r.getEmployee().getId().equals(accessPolicy.current().id())) {
-            throw new AccessDeniedException("You cannot review your own request. An admin will decide on it.");
-        }
         if (r.getStatus() != DayOffStatus.PENDING) {
             throw new BusinessRuleException("This request was already " + r.getStatus().name().toLowerCase() + ".");
         }

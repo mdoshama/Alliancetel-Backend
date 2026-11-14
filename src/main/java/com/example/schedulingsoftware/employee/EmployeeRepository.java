@@ -55,6 +55,26 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = { "area" })
     List<Employee> findByActiveTrueAndRoleIn(Collection<Role> roles);
 
+    @org.springframework.data.jpa.repository.Query(
+            "select a.id from Employee e join e.managedAreas a where e.id = :id")
+    List<Long> findAssignedAreaIds(@org.springframework.data.repository.query.Param("id") Long id);
+
+    /** Market Managers of an area (assigned to it, or with it as their home area). */
+    @org.springframework.data.jpa.repository.Query("select distinct e from Employee e left join e.managedAreas a "
+            + "where e.active = true and e.role = com.example.schedulingsoftware.employee.Role.MARKET_MANAGER "
+            + "and (a.id = :areaId or e.area.id = :areaId)")
+    List<Employee> findMarketManagersOf(@org.springframework.data.repository.query.Param("areaId") Long areaId);
+
+    /** The areas someone manages, for the signed-in user: their home area, plus the assigned ones for an MM. */
+    default java.util.Set<Long> managedAreaIdsOf(Long id, Role role) {
+        java.util.Set<Long> ids = new java.util.TreeSet<>();
+        findById(id).map(Employee::getArea).ifPresent(a -> ids.add(a.getId()));
+        if (role == Role.MARKET_MANAGER) {
+            ids.addAll(findAssignedAreaIds(id));
+        }
+        return ids;
+    }
+
     long countByHomeStoreIdAndActiveTrue(Long storeId);
 
     @Query("select e.homeStore.id, count(e) from Employee e where e.active = true and e.homeStore is not null group by e.homeStore.id")

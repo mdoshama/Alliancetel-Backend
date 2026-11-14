@@ -45,7 +45,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class TimeClockService {
 
-    private static final Set<Role> STAFF = EnumSet.of(Role.MANAGER, Role.EMPLOYEE);
+    private static final Set<Role> STAFF = EnumSet.of(Role.MANAGER, Role.MARKET_MANAGER, Role.EMPLOYEE);
 
     private final TimeEntryRepository repository;
     private final ScheduleEntryRepository shifts;

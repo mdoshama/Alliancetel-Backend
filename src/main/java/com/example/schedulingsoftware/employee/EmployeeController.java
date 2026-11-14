@@ -111,6 +111,13 @@ public class EmployeeController {
         return employeeService.findById(id);
     }
 
+    /** Admins: the areas a Market Manager manages (besides their home area). */
+    @PutMapping("/{id}/managed-areas")
+    public EmployeeResponse setManagedAreas(@PathVariable Long id,
+            @Valid @RequestBody EmployeeDtos.ManagedAreasRequest request) {
+        return employeeService.setManagedAreas(id, request.areaIds());
+    }
+
     @PostMapping("/{id}/reset-password")
     public CredentialsResponse resetPassword(@PathVariable Long id,
             @RequestParam(defaultValue = "false") boolean textLink) {

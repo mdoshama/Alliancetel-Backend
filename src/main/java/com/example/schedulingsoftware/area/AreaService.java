@@ -28,8 +28,11 @@ public class AreaService {
     public List<AreaResponse> findAll() {
         Map<Long, Long> counts = employeeRepository.countActiveByArea();
         // Managers and employees only see their own area.
-        Long onlyArea = accessPolicy.restrictToArea(null);
+        var user = accessPolicy.current();
+        // Market Managers see the areas they manage.
+        Long onlyArea = user.isMarketManager() ? null : accessPolicy.restrictToArea(null);
         return areaRepository.findAllByOrderByNameAsc().stream()
+                .filter(a -> !user.isMarketManager() || user.manages(a.getId()))
                 .filter(a -> onlyArea == null || a.getId().equals(onlyArea))
                 .map(a -> toResponse(a, counts.getOrDefault(a.getId(), 0L)))
                 .toList();

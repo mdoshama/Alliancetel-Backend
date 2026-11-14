@@ -36,7 +36,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class WeekRequests {
 
-    private static final Set<Role> SCHEDULED_ROLES = EnumSet.of(Role.MANAGER, Role.EMPLOYEE);
+    private static final Set<Role> SCHEDULED_ROLES = EnumSet.of(Role.MANAGER, Role.MARKET_MANAGER, Role.EMPLOYEE);
 
     private final EmployeeRepository employeeRepository;
     private final DayOffRequestRepository dayOffRepository;

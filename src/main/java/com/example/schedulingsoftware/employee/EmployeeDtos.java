@@ -104,6 +104,10 @@ public final class EmployeeDtos {
         }
     }
 
+    /** Admins: the areas a Market Manager manages (besides their home area). */
+    public record ManagedAreasRequest(@jakarta.validation.constraints.NotNull java.util.List<Long> areaIds) {
+    }
+
     /** Quick reassignment of someone's home store; null clears it. */
     public record HomeStoreRequest(Long storeId, Boolean primary) {
     }
@@ -142,7 +146,10 @@ public final class EmployeeDtos {
             /** Days of the week they're normally off, Monday first. */
             java.util.List<java.time.DayOfWeek> regularDaysOff,
             /** In training (shown as "Trainee"). */
-            boolean trainee) {
+            boolean trainee,
+            /** Market Managers: the areas they manage (besides their home area), and their names. */
+            java.util.List<Long> managedAreaIds,
+            java.util.List<String> managedAreaNames) {
 
         public static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -176,7 +183,13 @@ public final class EmployeeDtos {
                     e.isOnSchedule(),
                     e.isSmsOptIn() ? e.getSmsConsentBy() : null,
                     e.getRegularDaysOff().stream().sorted().toList(),
-                    e.isTrainee());
+                    e.isTrainee(),
+                    e.getRole() == Role.MARKET_MANAGER ? e.getManagedAreas().stream()
+                            .sorted(java.util.Comparator.comparing(com.example.schedulingsoftware.area.Area::getName))
+                            .map(com.example.schedulingsoftware.area.Area::getId).toList() : java.util.List.of(),
+                    e.getRole() == Role.MARKET_MANAGER ? e.getManagedAreas().stream()
+                            .map(com.example.schedulingsoftware.area.Area::getName).sorted().toList()
+                            : java.util.List.of());
         }
     }
 

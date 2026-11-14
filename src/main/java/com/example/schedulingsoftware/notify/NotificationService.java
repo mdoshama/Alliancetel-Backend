@@ -58,7 +58,7 @@ public class NotificationService {
                 .toList();
         List<Employee> people = areaId == null ? employeeRepository.findAll().stream().filter(Employee::isActive).toList()
                 : employeeRepository.findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId,
-                        EnumSet.of(Role.MANAGER, Role.EMPLOYEE));
+                        EnumSet.of(Role.MANAGER, Role.MARKET_MANAGER, Role.EMPLOYEE));
         long noPhone = people.stream().filter(e -> e.getRole() != Role.ADMIN && e.getPhone() == null).count();
         long notAgreed = people.stream().filter(e -> e.getRole() != Role.ADMIN && e.getPhone() != null && !e.isWhatsappOptIn())
                 .count();
@@ -86,7 +86,7 @@ public class NotificationService {
         Area area = areaService.getArea(areaId);
         CurrentUser user = accessPolicy.current();
         List<Employee> people = employeeRepository.findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(
-                areaId, EnumSet.of(Role.MANAGER, Role.EMPLOYEE)).stream()
+                areaId, EnumSet.of(Role.MANAGER, Role.MARKET_MANAGER, Role.EMPLOYEE)).stream()
                 .filter(e -> !e.getId().equals(user.id()))
                 .toList();
         if (people.isEmpty()) {
@@ -155,6 +155,31 @@ public class NotificationService {
         Area area = e.getArea();
         notifier.announce(area, List.of(e), user.fullName(), InputRules.clean(message));
         return new DirectMessageResult(sent, notSent);
+    }
+
+    /**
+     * Sends the same message to several people, each the way {@link #messagePerson} would ("{first}" becomes their
+     * first name). Someone who can't be reached (no way to message them, not in the manager's area) is listed with why;
+     * the others still get it.
+     */
+    @Transactional
+    public NotificationDtos.MessageManyResult messageMany(List<Long> employeeIds, String message) {
+        List<String> sent = new java.util.ArrayList<>();
+        List<NotificationDtos.NotReached> missed = new java.util.ArrayList<>();
+        for (Long id : new java.util.LinkedHashSet<>(employeeIds)) {
+            Employee e = employeeRepository.findById(id).orElse(null);
+            if (e == null) {
+                continue;
+            }
+            String text = message.replace("{first}", e.getFirstName());
+            try {
+                messagePerson(id, text.length() > 500 ? text.substring(0, 500) : text);
+                sent.add(e.getFullName());
+            } catch (BusinessRuleException | org.springframework.security.access.AccessDeniedException ex) {
+                missed.add(new NotificationDtos.NotReached(e.getFullName(), ex.getMessage()));
+            }
+        }
+        return new NotificationDtos.MessageManyResult(sent, missed);
     }
 
     /** Admins only: removes one message from the history (not one that's still being sent). */

@@ -22,6 +22,19 @@ public final class TestUsers {
         SecurityContextHolder.getContext().setAuthentication(auth);
     }
 
+    /** A Market Manager: home area plus the areas an admin assigned. */
+    public static void signInAsMarketManager(Long id, Long homeArea, java.util.Set<Long> managed) {
+        java.util.Set<Long> all = new java.util.HashSet<>(managed);
+        if (homeArea != null) {
+            all.add(homeArea);
+        }
+        CurrentUser user = new CurrentUser(id, "user" + id + "@test.example", "Test MM", Role.MARKET_MANAGER, homeArea,
+                false, all);
+        var auth = new UsernamePasswordAuthenticationToken(user, null,
+                List.of(new SimpleGrantedAuthority("ROLE_" + Role.MARKET_MANAGER.name())));
+        SecurityContextHolder.getContext().setAuthentication(auth);
+    }
+
     public static void signInAsAdmin() {
         signInAs(-1L, Role.ADMIN, null);
     }

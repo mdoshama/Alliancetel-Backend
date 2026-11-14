@@ -58,7 +58,7 @@ import lombok.RequiredArgsConstructor;
 public class ScheduleService {
 
     /** Managers work the floor too, so they are scheduled alongside employees. */
-    private static final Set<Role> SCHEDULED_ROLES = EnumSet.of(Role.MANAGER, Role.EMPLOYEE);
+    private static final Set<Role> SCHEDULED_ROLES = EnumSet.of(Role.MANAGER, Role.MARKET_MANAGER, Role.EMPLOYEE);
     /**
      * Schedules start with everyone working, so there is no regular day off to give back when a request is approved:
      * the approved day simply becomes a day off.
@@ -601,7 +601,7 @@ public class ScheduleService {
 
     /** 0 = managers, 1 = employees, 2 = trainees. */
     static int rowGroup(EmployeeRow r) {
-        return r.role() == Role.MANAGER ? 0 : r.trainee() ? 2 : 1;
+        return (r.role() == Role.MANAGER || r.role() == Role.MARKET_MANAGER) ? 0 : r.trainee() ? 2 : 1;
     }
 
     /** Where an approved day off came from, for the label managers and admins see on the schedule. */

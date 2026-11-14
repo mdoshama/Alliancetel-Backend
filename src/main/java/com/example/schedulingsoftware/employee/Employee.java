@@ -79,6 +79,13 @@ public class Employee {
             inverseJoinColumns = @JoinColumn(name = "store_id"))
     private java.util.Set<Store> floatStores = new java.util.HashSet<>();
 
+    /** Market Managers: the areas an admin gave them to manage (besides their home area). Empty for everyone else. */
+    @jakarta.persistence.ManyToMany(fetch = FetchType.LAZY)
+    @jakarta.persistence.JoinTable(name = "employee_managed_areas",
+            joinColumns = @JoinColumn(name = "employee_id"),
+            inverseJoinColumns = @JoinColumn(name = "area_id"))
+    private java.util.Set<Area> managedAreas = new java.util.HashSet<>();
+
     /** Primary at the home store: never moved away automatically. Ignored without a home store. */
     @Column(nullable = false)
     @org.hibernate.annotations.ColumnDefault("false")
@@ -213,13 +220,32 @@ public class Employee {
         return ids;
     }
 
+    /** Every area this person manages: their home area for managers, plus the assigned ones for Market Managers. */
+    public java.util.Set<Long> managedAreaIds() {
+        java.util.Set<Long> ids = new java.util.TreeSet<>();
+        if (role == Role.MANAGER || role == Role.MARKET_MANAGER) {
+            if (area != null) {
+                ids.add(area.getId());
+            }
+            if (role == Role.MARKET_MANAGER) {
+                managedAreas.forEach(a -> ids.add(a.getId()));
+            }
+        }
+        return ids;
+    }
+
+    /** Managers of either kind. */
+    public boolean isManagerRole() {
+        return role == Role.MANAGER || role == Role.MARKET_MANAGER;
+    }
+
     /** Primaries and managers stay at their home store unless a manager moves them by hand. */
     /** Active store staff who work shifts (see {@link #onSchedule}). */
     public boolean worksShifts() {
-        return active && onSchedule && (role == Role.EMPLOYEE || role == Role.MANAGER);
+        return active && onSchedule && (role == Role.EMPLOYEE || isManagerRole());
     }
 
     public boolean isAnchoredToStore() {
-        return homeStore != null && (primaryAtStore || role == Role.MANAGER);
+        return homeStore != null && (primaryAtStore || isManagerRole());
     }
 }

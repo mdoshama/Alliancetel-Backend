@@ -138,6 +138,12 @@ public class DayOffController {
         return dayOffService.changeDecision(id, body.status(), body.reason());
     }
 
+    /** The person (or their manager) moves a normal day off to another day of the same week. */
+    @PostMapping("/{id}/move")
+    public DayOffResponse move(@PathVariable Long id, @Valid @RequestBody DayOffDtos.MoveDayOffRequest body) {
+        return dayOffService.move(id, body.date());
+    }
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void cancel(@PathVariable Long id) {

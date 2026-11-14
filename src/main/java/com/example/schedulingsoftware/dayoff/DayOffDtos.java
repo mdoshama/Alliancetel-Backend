@@ -112,6 +112,10 @@ public final class DayOffDtos {
     }
 
     /** Change an approved or rejected request to the other decision. The reason is required and kept on the request. */
+    /** Moves a normal day off to another day of the same week. */
+    public record MoveDayOffRequest(@NotNull LocalDate date) {
+    }
+
     public record ChangeDecisionRequest(
             @NotNull DayOffStatus status,
             @jakarta.validation.constraints.NotBlank(message = "is required when changing a decision")

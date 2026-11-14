@@ -102,7 +102,7 @@ public class LiveUpdates {
         if (user.isAdmin() || actorAreaId == null) {
             return true;
         }
-        return Objects.equals(user.areaId(), actorAreaId);
+        return Objects.equals(user.areaId(), actorAreaId) || user.manages(actorAreaId);
     }
 
     /** A comment line every 25 seconds keeps proxies (nginx, Railway's edge) from closing an idle stream. */

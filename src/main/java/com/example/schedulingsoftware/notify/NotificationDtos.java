@@ -6,6 +6,7 @@ import java.util.List;
 import com.example.schedulingsoftware.common.InputRules;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -60,6 +61,23 @@ public final class NotificationDtos {
             @NotNull Long employeeId,
             @NotBlank @Size(max = 500) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG)
             String message) {
+    }
+
+    /**
+     * One message to several people (e.g. everyone who hasn't picked their day off). "{first}" in the text becomes
+     * each person's first name.
+     */
+    public record MessageManyRequest(
+            @NotEmpty @Size(max = 300) List<@NotNull Long> employeeIds,
+            @NotBlank @Size(max = 500) @Pattern(regexp = InputRules.SAFE_TEXT, message = InputRules.SAFE_TEXT_MSG)
+            String message) {
+    }
+
+    /** @param sent people it went to; notReached people it couldn't reach, each with why */
+    public record MessageManyResult(List<String> sent, List<NotReached> notReached) {
+    }
+
+    public record NotReached(String name, String reason) {
     }
 
     /**

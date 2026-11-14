@@ -56,7 +56,9 @@ public final class AuthDtos {
             /** Their regular days off, the same every week (a day they ask for replaces it that week). */
             java.util.List<java.time.DayOfWeek> regularDaysOff,
             /** On the weekly schedule (false for managers who only manage), so they have days off to ask for. */
-            boolean worksShifts) {
+            boolean worksShifts,
+            /** Areas they manage (managers: their own; Market Managers: their home area and the assigned ones). */
+            java.util.List<AreaRef> managedAreas) {
 
         public static Me from(Employee e) {
             // Employees aren't told their home store: primary / secondary / floater is for admins and managers.
@@ -74,8 +76,24 @@ public final class AuthDtos {
                     e.getBirthDate(),
                     e.getWorkDaysPerWeek(),
                     e.getRegularDaysOff().stream().sorted().toList(),
-                    e.worksShifts());
+                    e.worksShifts(),
+                    managedAreas(e));
         }
+
+        private static java.util.List<AreaRef> managedAreas(Employee e) {
+            java.util.Map<Long, String> areas = new java.util.HashMap<>();
+            if (e.isManagerRole() && e.getArea() != null) {
+                areas.put(e.getArea().getId(), e.getArea().getName());
+            }
+            if (e.getRole() == Role.MARKET_MANAGER) {
+                e.getManagedAreas().forEach(a -> areas.put(a.getId(), a.getName()));
+            }
+            return areas.entrySet().stream().map(x -> new AreaRef(x.getKey(), x.getValue()))
+                    .sorted(java.util.Comparator.comparing(AreaRef::name)).toList();
+        }
+    }
+
+    public record AreaRef(Long id, String name) {
     }
 
     /** Turn your own WhatsApp (or email) schedule updates on or off. */

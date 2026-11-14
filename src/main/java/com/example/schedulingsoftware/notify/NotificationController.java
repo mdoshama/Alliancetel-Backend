@@ -50,6 +50,12 @@ public class NotificationController {
         return service.messagePerson(body.employeeId(), body.message());
     }
 
+    /** Managers and admins: one message to several people, e.g. everyone who hasn't picked a day off. */
+    @PostMapping("/direct-many")
+    public NotificationDtos.MessageManyResult directMany(@Valid @RequestBody NotificationDtos.MessageManyRequest body) {
+        return service.messageMany(body.employeeIds(), body.message());
+    }
+
     /** Admins only: remove one message from the history. */
     @org.springframework.web.bind.annotation.DeleteMapping("/{id}")
     public org.springframework.http.ResponseEntity<Void> delete(@PathVariable Long id) {
