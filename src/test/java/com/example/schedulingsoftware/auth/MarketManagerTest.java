@@ -1,6 +1,7 @@
 package com.example.schedulingsoftware.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -79,7 +80,9 @@ class MarketManagerTest {
     @Test
     void adminAssignsAreasAndTheyApplyAtSignIn() {
         var saved = employeeService.setManagedAreas(mm, List.of(losAngeles, sanDiego));
-        assertEquals(List.of(losAngeles), saved.managedAreaIds(), "home area isn't listed twice");
+        // A Market Manager has no home area: every area they manage is an assigned one.
+        assertNull(saved.areaId(), "no home area");
+        assertEquals(Set.of(sanDiego, losAngeles), Set.copyOf(saved.managedAreaIds()));
         assertEquals(Set.of(sanDiego, losAngeles), employeeRepository.managedAreaIdsOf(mm, Role.MARKET_MANAGER));
     }
 

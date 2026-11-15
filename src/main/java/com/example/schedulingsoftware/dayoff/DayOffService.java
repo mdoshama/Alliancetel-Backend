@@ -248,6 +248,15 @@ public class DayOffService {
         if (selfService && !emergency && requestWindow) {
             checkWindow(employee, dates);
         }
+        if (selfService && !emergency && !override) {
+            // A day off that was turned down isn't asked for again as a normal day: only as an emergency.
+            for (LocalDate date : dates) {
+                if (rejectedOn(employee, date)) {
+                    throw new BusinessRuleException("Your request for " + dayName(date) + " was rejected. You can ask "
+                            + "for it again as an emergency request.");
+                }
+            }
+        }
         if (selfService && emergency && oneEmergencyPerMonth) {
             checkEmergencyLimit(employee, dates);
         }
@@ -494,27 +503,52 @@ public class DayOffService {
         LocalDate today = portal.today();
         LocalDate open = RequestPortal.openWeek(today);
         RequestPortalSetting setting = portal.setting();
-        List<LocalDate> weeks = RequestPortal.openWeeks(setting.getMode(), today);
         CurrentUser user = accessPolicy.current();
-        com.example.schedulingsoftware.area.Area area = user.areaId() == null ? null
-                : areaRepository.findById(user.areaId()).orElse(null);
+        // Admins see the company-wide switch; everyone else their area's (a Market Manager: the area they work in).
+        Long areaId = user.isAdmin() ? user.areaId() : accessPolicy.restrictToArea(null);
+        com.example.schedulingsoftware.area.Area area = areaId == null ? null
+                : areaRepository.findById(areaId).orElse(null);
+        boolean areaOwn = !user.isAdmin() && area != null && area.getRequestPortalMode() != null;
+        PortalMode mode = areaOwn ? area.getRequestPortalMode() : setting.getMode();
+        List<LocalDate> weeks = RequestPortal.openWeeks(mode, today);
         LocalDate until = openUntil(area);
         return new DayOffDtos.RequestWindow(requestWindow, open, open.plusDays(6), open.minusDays(3),
                 open.plusDays(7).minusDays(9), oneEmergencyPerMonth,
-                oneEmergencyPerMonth && emergencyUsed(user.id(), today), setting.getMode(), weeks,
-                setting.getChangedBy(), setting.getChangedAt(), reservations.isEnabled(),
+                oneEmergencyPerMonth && emergencyUsed(user.id(), today), mode, weeks,
+                areaOwn ? area.getRequestPortalChangedBy() : setting.getChangedBy(),
+                areaOwn ? area.getRequestPortalChangedAt() : setting.getChangedAt(), reservations.isEnabled(),
                 until, until == null ? null : area.getRequestsOpenedBy(), lastSelfServiceDate(until),
-                publishedWeeks(user.areaId(), weekStart(portal.today()).plusWeeks(8)));
+                publishedWeeks(areaId, weekStart(portal.today()).plusWeeks(8)), areaOwn,
+                area == null || user.isAdmin() ? null : area.getId());
     }
 
-    /** Admins: opens or closes the request portal, or puts it back on the normal Friday cycle. */
+    /** Admins: opens or closes the request portal for the whole company, or puts it back on the Friday cycle. */
     @Transactional
     public DayOffDtos.RequestWindow setPortal(PortalMode mode) {
+        return setPortal(mode, null);
+    }
+
+    /**
+     * Opens or closes day-off requests. With an area: for that area only (its manager or an admin; AUTO goes back to
+     * the company setting). Without: company-wide (admins only).
+     */
+    @Transactional
+    public DayOffDtos.RequestWindow setPortal(PortalMode mode, Long areaId) {
         CurrentUser user = accessPolicy.current();
-        if (!user.isAdmin()) {
-            throw new AccessDeniedException("Only admins can open or close day-off requests.");
+        if (areaId == null) {
+            if (!user.isAdmin()) {
+                throw new AccessDeniedException("Only admins can open or close day-off requests for every area.");
+            }
+            portal.setMode(mode, user.fullName());
+        } else {
+            accessPolicy.requireManagerOf(areaId);
+            com.example.schedulingsoftware.area.Area area = areaRepository.findById(areaId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Area", areaId));
+            area.setRequestPortalMode(mode == PortalMode.AUTO ? null : mode);
+            area.setRequestPortalChangedBy(mode == PortalMode.AUTO ? null : user.fullName());
+            area.setRequestPortalChangedAt(mode == PortalMode.AUTO ? null : java.time.Instant.now());
+            areaRepository.saveAndFlush(area);
         }
-        portal.setMode(mode, user.fullName());
         if (mode != PortalMode.CLOSED) {
             reservations.reserveUpcoming();
         }
@@ -581,7 +615,7 @@ public class DayOffService {
      */
     private boolean openForRequests(Employee employee, LocalDate date) {
         LocalDate today = portal.today();
-        if (RequestPortal.openWeeks(portal.mode(), today).contains(weekStart(date))) {
+        if (RequestPortal.openWeeks(portal.modeFor(employee.getArea()), today).contains(weekStart(date))) {
             return true;
         }
         LocalDate until = openUntil(employee.getArea());
@@ -590,7 +624,7 @@ public class DayOffService {
 
     private void checkWindow(Employee employee, java.util.Collection<LocalDate> dates) {
         LocalDate today = portal.today();
-        PortalMode mode = portal.mode();
+        PortalMode mode = portal.modeFor(employee.getArea());
         LocalDate until = openUntil(employee.getArea());
         if (until != null) {
             for (LocalDate date : dates) {
@@ -666,6 +700,10 @@ public class DayOffService {
      */
     private void checkEmergencyOnlyWhenFull(Employee employee, java.util.Collection<LocalDate> dates) {
         for (LocalDate date : dates) {
+            // A day whose request was turned down can be asked for again as an emergency while requests are open.
+            if (rejectedOn(employee, date) && openForRequests(employee, date)) {
+                continue;
+            }
             if (openForNormalRequest(employee, date)) {
                 throw new BusinessRuleException(dayName(date) + " is still open, so ask for it as a normal day off. "
                         + "Emergency requests are for days that are full, or once your days off that week are used.");
@@ -909,6 +947,12 @@ public class DayOffService {
      * Makes the day free to ask for again: a request that was turned down doesn't block a new one for the same day (it
      * is replaced). Returns false when they still have a live request (waiting or approved) that day.
      */
+    /** Their request for that day was turned down (and nothing newer replaced it). */
+    private boolean rejectedOn(Employee employee, LocalDate date) {
+        return repository.findByEmployeeIdAndOffDate(employee.getId(), date)
+                .map(r -> r.getStatus() == DayOffStatus.REJECTED).orElse(false);
+    }
+
     private boolean clearRejected(Employee employee, LocalDate date) {
         DayOffRequest existing = repository.findByEmployeeIdAndOffDate(employee.getId(), date).orElse(null);
         if (existing == null) {

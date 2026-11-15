@@ -45,6 +45,7 @@ public class WeekRequests {
     private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
     private final FullWeekRepository fullWeeks;
     private final WeeklyScheduleRepository scheduleRepository;
+    private final com.example.schedulingsoftware.area.AreaRepository areaRepository;
 
     /** Where someone stands for the week. */
     public enum State {
@@ -129,7 +130,7 @@ public class WeekRequests {
         List<PersonStatus> full = people.stream().filter(p -> p.state() == State.FULL_WEEK).toList();
         List<PersonStatus> regular = people.stream().filter(p -> p.state() == State.REGULAR).toList();
         return new Status(week, people.size(), people.size() - missing.size() - reserved.size(), missing, denied,
-                fewer, reserved, others, portal.isOpenFor(week), capacity(areaId, week), full, regular);
+                fewer, reserved, others, portal.isOpenFor(week, areaRepository.findById(areaId).orElse(null)), capacity(areaId, week), full, regular);
     }
 
     /** See {@link Capacity}. */

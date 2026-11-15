@@ -82,6 +82,17 @@ public class RequestPortal {
         return openWeeks().contains(weekStart);
     }
 
+    /** The mode for an area: its own (set by its manager or an admin) when it has one, otherwise the company's. */
+    @Transactional(readOnly = true)
+    public PortalMode modeFor(com.example.schedulingsoftware.area.Area area) {
+        return area != null && area.getRequestPortalMode() != null ? area.getRequestPortalMode() : mode();
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isOpenFor(LocalDate weekStart, com.example.schedulingsoftware.area.Area area) {
+        return openWeeks(modeFor(area), today()).contains(weekStart);
+    }
+
     /** Weeks that get reserved days off: the next two weeks (whatever the portal's mode). */
     public List<LocalDate> reservableWeeks() {
         LocalDate next = DayOffService.weekStart(today()).plusWeeks(1);

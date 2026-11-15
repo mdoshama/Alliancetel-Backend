@@ -63,7 +63,9 @@ public final class DayOffDtos {
              * Weeks (Mondays) whose schedule is already published in their area: the day off it gives them there stays,
              * so picking another day that week is an emergency.
              */
-            List<LocalDate> publishedWeeks) {
+            List<LocalDate> publishedWeeks,
+            /** The mode above is the area's own (its manager or an admin opened or closed it there), and which area. */
+            boolean areaOwn, Long areaId) {
     }
 
     /** A manager or admin opens an area's requests up to a date, or back to the usual window (null). */
@@ -73,7 +75,8 @@ public final class DayOffDtos {
     public record OpenUntilResponse(Long areaId, LocalDate until, String by) {
     }
 
-    public record PortalRequest(@NotNull PortalMode mode) {
+    /** areaId: that area only (managers); none: every area (admins). */
+    public record PortalRequest(@NotNull PortalMode mode, Long areaId) {
     }
 
     /** Days off a manager gives (e.g. from the suggestions), approved straight away. */

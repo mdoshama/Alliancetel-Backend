@@ -55,6 +55,9 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = { "area" })
     List<Employee> findByActiveTrueAndRoleIn(Collection<Role> roles);
 
+    /** People of a role who still have a home area (Market Managers from before they lost theirs). */
+    List<Employee> findByRoleAndAreaIsNotNull(Role role);
+
     @org.springframework.data.jpa.repository.Query(
             "select a.id from Employee e join e.managedAreas a where e.id = :id")
     List<Long> findAssignedAreaIds(@org.springframework.data.repository.query.Param("id") Long id);

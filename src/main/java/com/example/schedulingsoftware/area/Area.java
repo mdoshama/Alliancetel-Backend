@@ -50,6 +50,21 @@ public class Area {
     @Column(name = "requests_opened_at")
     private Instant requestsOpenedAt;
 
+    /**
+     * Day-off requests opened or closed for this area only (by its manager or an admin). Null: the area follows the
+     * company-wide setting.
+     */
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "request_portal_mode", length = 10)
+    private com.example.schedulingsoftware.dayoff.PortalMode requestPortalMode;
+
+    /** Who last opened or closed this area's requests, and when. */
+    @Column(name = "request_portal_changed_by", length = 120)
+    private String requestPortalChangedBy;
+
+    @Column(name = "request_portal_changed_at")
+    private Instant requestPortalChangedAt;
+
     public Area(String name, String description) {
         this.name = name;
         this.description = description;

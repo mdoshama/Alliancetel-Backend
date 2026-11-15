@@ -85,10 +85,13 @@ public class DayOffController {
         return dayOffService.window();
     }
 
-    /** Admins: open or close the request portal, or back to the Friday cycle (AUTO). */
+    /**
+     * Open or close day-off requests, or back to the Friday cycle (AUTO): for one area (its manager or an admin) or,
+     * without an area, for every area (admins).
+     */
     @PutMapping("/portal")
     public DayOffDtos.RequestWindow setPortal(@Valid @RequestBody DayOffDtos.PortalRequest body) {
-        return dayOffService.setPortal(body.mode());
+        return dayOffService.setPortal(body.mode(), body.areaId());
     }
 
     /** Managers (their area) and admins: let employees ask further ahead, up to a date; null = the usual window. */

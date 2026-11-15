@@ -83,6 +83,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PATCH, "/api/employees/*/home-store").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
                         .requestMatchers(HttpMethod.PUT, "/api/employees/*/regular-days-off").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
                         .requestMatchers(HttpMethod.PUT, "/api/employees/*/work-days").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
+                        // Managers edit the employees in their area (no adding, deactivating or role changes: see EmployeeService).
+                        .requestMatchers(HttpMethod.PUT, "/api/employees/*").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
                         .requestMatchers("/api/employees/**").hasRole(ADMIN)
 
                         // Everyone can request days off; only managers and admins decide on them.

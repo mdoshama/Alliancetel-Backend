@@ -190,6 +190,7 @@ public class EmployeeService {
     public EmployeeResponse update(Long id, EmployeeRequest request) {
         Employee employee = getEmployee(id);
         requireNotDeleted(employee);
+        requireCanEdit(employee, request);
         String code = request.employeeCode().trim().toUpperCase(Locale.ROOT);
         String email = emailOf(request);
         String phone = signInDetails(request, email);
@@ -211,6 +212,34 @@ public class EmployeeService {
             notifier.smsOptInConfirmation(employee.getId());
         }
         return EmployeeResponse.from(employee);
+    }
+
+    /**
+     * Admins edit anyone. Managers edit the employees and trainees of the areas they manage: not themselves (that's
+     * their profile), not other managers, admins or back office; no role change (only employee ↔ trainee), no move
+     * to an area they don't manage, and no deactivating or reactivating.
+     */
+    private void requireCanEdit(Employee employee, EmployeeRequest request) {
+        var by = accessPolicy.current();
+        if (by.isAdmin()) {
+            return;
+        }
+        if (employee.getId().equals(by.id())) {
+            throw new BusinessRuleException("Update your own details on your profile page.");
+        }
+        if (employee.getRole() != Role.EMPLOYEE) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Only an admin can edit managers, admins and back office staff.");
+        }
+        accessPolicy.requireManagerOf(employee.getArea() == null ? null : employee.getArea().getId());
+        if (request.role() != Role.EMPLOYEE) {
+            throw new BusinessRuleException("Only an admin can change someone's role. You can switch them between "
+                    + "employee and trainee.");
+        }
+        accessPolicy.requireManagerOf(request.areaId());
+        if (request.active() != null && request.active() != employee.isActive()) {
+            throw new BusinessRuleException("Only an admin can deactivate or reactivate someone.");
+        }
     }
 
     /** Employees are deactivated rather than deleted so their schedule history stays intact. */
@@ -405,11 +434,13 @@ public class EmployeeService {
         // shouldn't fail because of that).
         boolean alreadyPrimaryHere = employee.getId() != null && employee.isActive() && employee.isPrimaryAtStore()
                 && employee.getHomeStore() != null && employee.getHomeStore().getId().equals(request.homeStoreId());
-        if ((request.role() == Role.MANAGER || request.role() == Role.MARKET_MANAGER || request.role() == Role.EMPLOYEE)
-                && request.areaId() == null) {
-            throw new BusinessRuleException("Managers and employees must be assigned to an area (a Market Manager's "
-                    + "home area).");
+        if ((request.role() == Role.MANAGER || request.role() == Role.EMPLOYEE) && request.areaId() == null) {
+            throw new BusinessRuleException("Managers and employees must be assigned to an area.");
         }
+        // A Market Manager has no home area (or store): they manage the areas an admin assigns and aren't scheduled.
+        boolean market = request.role() == Role.MARKET_MANAGER;
+        Long areaId = market ? null : request.areaId();
+        Long homeStoreId = market ? null : request.homeStoreId();
         if (employee.getId() != null && employee.getId().equals(accessPolicy.current().id())
                 && (request.role() != Role.ADMIN || Boolean.FALSE.equals(request.active()))) {
             throw new BusinessRuleException("You cannot remove your own admin access.");
@@ -454,9 +485,8 @@ public class EmployeeService {
             // Only Market Managers manage areas besides their own.
             employee.getManagedAreas().clear();
         }
-        employee.setArea(request.areaId() == null ? null : areaService.getArea(request.areaId()));
-        employee.setHomeStore(request.homeStoreId() == null ? null
-                : storeService.requireAssignable(request.homeStoreId(), request.areaId()));
+        employee.setArea(areaId == null ? null : areaService.getArea(areaId));
+        employee.setHomeStore(homeStoreId == null ? null : storeService.requireAssignable(homeStoreId, areaId));
         if (request.primaryAtStore() != null) {
             employee.setPrimaryAtStore(request.primaryAtStore());
         }
@@ -466,7 +496,9 @@ public class EmployeeService {
         employee.setWorkDaysPerWeek(request.workDaysPerWeek());
         // Only managers can be off the schedule (managing without working shifts); everyone else works.
         boolean wasOnSchedule = employee.isOnSchedule();
-        if (request.role() != Role.MANAGER && request.role() != Role.MARKET_MANAGER) {
+        if (market) {
+            employee.setOnSchedule(false);
+        } else if (request.role() != Role.MANAGER) {
             employee.setOnSchedule(true);
         } else if (request.onSchedule() != null) {
             employee.setOnSchedule(request.onSchedule());
@@ -483,10 +515,12 @@ public class EmployeeService {
                     employee.getId(), java.time.LocalDate.now(), java.time.LocalDate.now().plusYears(1)).stream()
                     .filter(r -> r.getStatus() == com.example.schedulingsoftware.dayoff.DayOffStatus.PENDING).toList());
         }
-        if (request.floatStoreIds() != null) {
+        if (market) {
+            employee.getFloatStores().clear();
+        } else if (request.floatStoreIds() != null) {
             java.util.Set<com.example.schedulingsoftware.store.Store> stores = new java.util.HashSet<>();
             for (Long storeId : new java.util.LinkedHashSet<>(request.floatStoreIds())) {
-                stores.add(storeService.requireAssignable(storeId, request.areaId()));
+                stores.add(storeService.requireAssignable(storeId, areaId));
             }
             employee.getFloatStores().clear();
             employee.getFloatStores().addAll(stores);
