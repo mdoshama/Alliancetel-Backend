@@ -211,16 +211,22 @@ public class ScheduleService {
         WeeklySchedule schedule = getManaged(scheduleId);
         requireDraft(schedule);
         ScheduleEntry entry = entry(schedule, entryId);
-        if (type == DayType.WORK && hasApprovedDayOff(entry.getEmployee(), entry.getWorkDate())) {
+        // The empty draft is the manager's own: they decide every day, approved requests included (shown as a hint).
+        // Working on an approved day off is confirmed when the draft is published.
+        boolean emptyDraft = schedule.getKind() == ScheduleKind.EMPTY;
+        if (emptyDraft && type == DayType.REQUESTED_OFF) {
+            type = DayType.OFF;
+        }
+        if (!emptyDraft && type == DayType.WORK && hasApprovedDayOff(entry.getEmployee(), entry.getWorkDate())) {
             throw new BusinessRuleException(entry.getEmployee().getFirstName() + " has an approved day off on "
                     + dayName(entry.getWorkDate()) + ", so it can't be made a work day.");
         }
-        boolean approved = hasApprovedDayOff(entry.getEmployee(), entry.getWorkDate());
+        boolean approved = !emptyDraft && hasApprovedDayOff(entry.getEmployee(), entry.getWorkDate());
         if (approved && type != DayType.REQUESTED_OFF) {
             throw new BusinessRuleException(entry.getEmployee().getFirstName() + " has an approved day off on "
                     + dayName(entry.getWorkDate()) + ". It stays off.");
         }
-        if (!approved && type == DayType.REQUESTED_OFF) {
+        if (!emptyDraft && !approved && type == DayType.REQUESTED_OFF) {
             throw new BusinessRuleException("An approved day off comes from approving a day-off request. Choose Off "
                     + "to give " + entry.getEmployee().getFirstName() + " the day off.");
         }
@@ -509,7 +515,10 @@ public class ScheduleService {
                     if (s.getKind() != ScheduleKind.MAIN) {
                         unlockRevokedDaysOff(s);
                     }
-                    ensureApprovedDaysOff(s);
+                    // The empty draft stays as the manager left it: approved requests are only a hint there.
+                    if (s.getKind() != ScheduleKind.EMPTY) {
+                        ensureApprovedDaysOff(s);
+                    }
                     return toResponse(s);
                 });
     }
@@ -527,9 +536,10 @@ public class ScheduleService {
     }
 
     /**
-     * Starts (or starts over) a draft built by hand. {@link ScheduleKind#EMPTY}: every day blank, except approved days
-     * off (locked: nobody works on a day they were given off) and days every store is closed. {@link
-     * ScheduleKind#DAYS_OFF}: the same, plus each person's regular day off. The main schedule isn't touched.
+     * Starts (or starts over) a draft built by hand. {@link ScheduleKind#EMPTY}: every day blank; the manager gives the
+     * days off (approved requests show as a hint) and the system can fill the rest. {@link ScheduleKind#DAYS_OFF}:
+     * approved days off (locked), days every store is closed and each person's regular day off are filled in. The main
+     * schedule isn't touched.
      */
     @Transactional
     public ScheduleResponse createDraft(Long areaId, LocalDate anyDayInWeek, ScheduleKind kind) {
@@ -576,7 +586,9 @@ public class ScheduleService {
         for (Employee e : staff) {
             for (LocalDate date : weekDates(draft)) {
                 DayType type = DayType.UNSET;
-                if (!open.isEmpty() && open.stream().noneMatch(st -> st.isOpenOn(date))) {
+                if (kind == ScheduleKind.EMPTY) {
+                    // Totally empty: the manager gives the days off, the system can do the rest.
+                } else if (!open.isEmpty() && open.stream().noneMatch(st -> st.isOpenOn(date))) {
                     type = DayType.OFF;
                 } else if (approved.getOrDefault(e.getId(), Set.of()).contains(date)) {
                     type = DayType.REQUESTED_OFF;
@@ -605,8 +617,20 @@ public class ScheduleService {
         WeeklySchedule schedule = getManaged(scheduleId);
         requireDraft(schedule);
         unlockRevokedDaysOff(schedule);
-        ensureApprovedDaysOff(schedule);
         Long areaId = schedule.getArea().getId();
+        if (schedule.getKind() == ScheduleKind.EMPTY) {
+            // What the manager placed stays, even on an approved day off; a day still blank that someone has approved
+            // off becomes their day off.
+            for (DayOffRequest r : dayOffRepository.findForArea(areaId, DayOffStatus.APPROVED, schedule.getWeekStart(),
+                    schedule.getWeekEnd())) {
+                schedule.getEntries().stream()
+                        .filter(e -> e.getType() == DayType.UNSET && e.getWorkDate().equals(r.getOffDate())
+                                && e.getEmployee().getId().equals(r.getEmployee().getId()))
+                        .forEach(e -> e.setType(DayType.REQUESTED_OFF));
+            }
+        } else {
+            ensureApprovedDaysOff(schedule);
+        }
         List<LocalDate> dates = weekDates(schedule);
         List<Store> areaStores = storeRepository.findByAreaIdOrderByNameAsc(areaId);
         List<Store> active = areaStores.stream().filter(Store::isActive).toList();
@@ -722,13 +746,32 @@ public class ScheduleService {
     private ScheduleResponse publishDraft(WeeklySchedule draft) {
         requireDraft(draft);
         unlockRevokedDaysOff(draft);
-        ensureApprovedDaysOff(draft);
+        if (draft.getKind() != ScheduleKind.EMPTY) {
+            ensureApprovedDaysOff(draft);
+        }
         long blank = draft.getEntries().stream().filter(e -> e.getType() == DayType.UNSET).count();
         if (blank > 0) {
             throw new BusinessRuleException(blank + (blank == 1 ? " day is" : " days are") + " still empty. Fill "
                     + (blank == 1 ? "it" : "them") + " in, or press \"Fill the rest\", before publishing.");
         }
         Long areaId = draft.getArea().getId();
+        if (draft.getKind() == ScheduleKind.EMPTY) {
+            // The manager scheduled someone to work on a day they had off: that day off is turned down, so the
+            // published week keeps the manager's decision (they see the change with their week).
+            Map<String, DayType> placed = new HashMap<>();
+            draft.getEntries().forEach(d -> placed.put(d.getEmployee().getId() + "|" + d.getWorkDate(), d.getType()));
+            String by = accessPolicy.current().fullName();
+            for (DayOffRequest r : dayOffRepository.findForArea(areaId, DayOffStatus.APPROVED, draft.getWeekStart(),
+                    draft.getWeekEnd())) {
+                if (placed.get(r.getEmployee().getId() + "|" + r.getOffDate()) == DayType.WORK) {
+                    r.setStatus(DayOffStatus.REJECTED);
+                    r.setReviewNote("Scheduled to work by " + by + ".");
+                    r.setReviewedAt(Instant.now());
+                    r.setReviewedBy(by);
+                }
+            }
+            dayOffRepository.flush();
+        }
         WeeklySchedule main = scheduleRepository.findByAreaIdAndWeekStart(areaId, draft.getWeekStart())
                 .orElseGet(() -> {
                     WeeklySchedule s = new WeeklySchedule();
@@ -1519,7 +1562,7 @@ public class ScheduleService {
                                     x.getStore() == null ? null : x.getStore().hoursOn(x.getWorkDate().getDayOfWeek()).getClosesAt(),
                                     x.getStore() != null && !x.getStore().isOpenOn(x.getWorkDate()),
                                     plainDaysOff ? null : requestByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate()),
-                                    x.getType() == DayType.REQUESTED_OFF
+                                    x.getType() == DayType.REQUESTED_OFF || schedule.getKind() == ScheduleKind.EMPTY
                                             ? approvedByDay.get(x.getEmployee().getId() + "|" + x.getWorkDate())
                                             : null,
                                     x.getType() == DayType.REQUESTED_OFF && !plainDaysOff

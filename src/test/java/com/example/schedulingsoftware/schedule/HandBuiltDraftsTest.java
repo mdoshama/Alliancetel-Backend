@@ -94,7 +94,7 @@ class HandBuiltDraftsTest {
     }
 
     @Test
-    void theEmptyDraftStartsBlankWithApprovedDaysOffLocked() {
+    void theEmptyDraftIsTotallyEmptyAndTheManagerDecidesTheDaysOff() {
         LocalDate wed = week.plusDays(2);
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
         dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null));
@@ -102,24 +102,61 @@ class HandBuiltDraftsTest {
 
         ScheduleResponse draft = scheduleService.createDraft(area, week, ScheduleKind.EMPTY);
         assertEquals(ScheduleKind.EMPTY, draft.kind());
-        assertEquals(27, draft.blankDays(), "4 people x 7 days, minus Anna's approved Wednesday");
+        assertEquals(28, draft.blankDays(), "4 people x 7 days, all empty");
         DayCell annaWed = row(draft, anna).days().get(2);
-        assertEquals(DayType.REQUESTED_OFF, annaWed.type());
-        // Locked: she can't be put to work on her approved day off.
-        assertThrows(BusinessRuleException.class,
-                () -> scheduleService.updateEntry(draft.id(), annaWed.entryId(), DayType.WORK, north));
+        assertEquals(DayType.UNSET, annaWed.type());
+        assertTrue(annaWed.approvedRequestId() != null, "her approved day off shows as a hint");
 
-        // Placing by hand: Ben at South on Monday.
+        // The manager decides: Ben off on Monday, Ben at South on Tuesday.
         DayCell benMon = row(draft, ben).days().getFirst();
-        ScheduleResponse placed = scheduleService.updateEntry(draft.id(), benMon.entryId(), DayType.WORK, south);
-        assertEquals(south, row(placed, ben).days().getFirst().storeId());
+        DayCell benTue = row(draft, ben).days().get(1);
+        scheduleService.updateEntry(draft.id(), benMon.entryId(), DayType.OFF, null);
+        ScheduleResponse placed = scheduleService.updateEntry(draft.id(), benTue.entryId(), DayType.WORK, south);
+        assertEquals(DayType.OFF, row(placed, ben).days().getFirst().type());
+        assertEquals(south, row(placed, ben).days().get(1).storeId());
         assertEquals(26, placed.blankDays());
-        // And back to blank.
         assertEquals(27, scheduleService.updateEntry(draft.id(), benMon.entryId(), DayType.UNSET, null).blankDays());
 
         // The week's main schedule doesn't exist yet: the draft is separate.
         assertTrue(scheduleService.find(area, week).isEmpty());
         assertEquals(1, scheduleService.drafts(area, week).size());
+    }
+
+    @Test
+    void theSystemFillsTheRestOfTheEmptyDraftAroundTheManagersDaysOff() {
+        LocalDate wed = week.plusDays(2);
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null));
+        TestUsers.signInAsAdmin();
+        ScheduleResponse draft = scheduleService.createDraft(area, week, ScheduleKind.EMPTY);
+        // The manager gives Ben Friday off; everything else is left to the system.
+        scheduleService.updateEntry(draft.id(), row(draft, ben).days().get(4).entryId(), DayType.OFF, null);
+
+        ScheduleResponse filled = scheduleService.fillBlanks(draft.id());
+        assertEquals(0, filled.blankDays());
+        assertEquals(DayType.OFF, row(filled, ben).days().get(4).type(), "the manager's day off stays");
+        assertEquals(DayType.REQUESTED_OFF, row(filled, anna).days().get(2).type(), "a blank approved day stays off");
+        for (EmployeeRow r : filled.rows()) {
+            assertEquals(6, r.scheduledWorkDays(), r.employeeName() + " works their 6 days");
+        }
+        assertTrue(filled.coverageGaps().isEmpty(), "every store covered: " + filled.coverageGaps());
+    }
+
+    @Test
+    void workingOnAnApprovedDayOffInTheEmptyDraftTurnsItDownWhenPublished() {
+        LocalDate wed = week.plusDays(2);
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        Long request = dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null)).getFirst().id();
+        TestUsers.signInAsAdmin();
+        ScheduleResponse draft = scheduleService.createDraft(area, week, ScheduleKind.EMPTY);
+        scheduleService.updateEntry(draft.id(), row(draft, anna).days().get(2).entryId(), DayType.WORK, north);
+        scheduleService.updateEntry(draft.id(), row(draft, anna).days().get(5).entryId(), DayType.OFF, null);
+
+        ScheduleResponse published = scheduleService.publish(scheduleService.fillBlanks(draft.id()).id());
+        assertEquals(DayType.WORK, row(published, anna).days().get(2).type(), "the manager's decision is published");
+        assertEquals(com.example.schedulingsoftware.dayoff.DayOffStatus.REJECTED,
+                dayOffService.page(area, anna, null, wed, wed, null, 0, 10).content().getFirst().status());
+        assertTrue(request != null);
     }
 
     @Test
