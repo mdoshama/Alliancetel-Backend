@@ -142,10 +142,10 @@ public class DayOffReservations {
         return n;
     }
 
-    /** Reserves the missing days off in one area's week (skipped once that week is published). */
+    /** Reserves the missing days off in one area's week (skipped once that week's schedule is made). */
     @Transactional
     public int reserveWeek(Long areaId, LocalDate weekStart) {
-        if (!enabled || published(areaId, weekStart)) {
+        if (!enabled || made(areaId, weekStart)) {
             return 0;
         }
         return fill(areaId, weekStart);
@@ -314,7 +314,7 @@ public class DayOffReservations {
         }
         Long areaId = e.getArea().getId();
         for (LocalDate week : portal.reservableWeeks()) {
-            if (published(areaId, week)) {
+            if (made(areaId, week)) {
                 continue;
             }
             List<DayOffRequest> held = repository
@@ -358,8 +358,22 @@ public class DayOffReservations {
      */
     @Transactional
     public List<DayOffRequest> trim(Employee e, LocalDate anyDayInWeek, boolean regularToo, boolean evenPublished) {
+        return trim(e, anyDayInWeek, regularToo, evenPublished, false);
+    }
+
+    /**
+     * @param byManager a manager or admin just approved a day for them. On a week whose schedule is made, only then
+     *                  are held days given back (they work them on the schedule); otherwise the week is left alone.
+     */
+    @Transactional
+    public List<DayOffRequest> trim(Employee e, LocalDate anyDayInWeek, boolean regularToo, boolean evenPublished,
+            boolean byManager) {
         LocalDate week = DayOffService.weekStart(anyDayInWeek);
-        if (!evenPublished && published(e.getArea() == null ? null : e.getArea().getId(), week)) {
+        boolean made = made(e.getArea() == null ? null : e.getArea().getId(), week);
+        if (made && !byManager) {
+            return List.of();
+        }
+        if (!made && !evenPublished && published(e.getArea() == null ? null : e.getArea().getId(), week)) {
             return List.of();
         }
         List<DayOffRequest> held = repository
@@ -380,7 +394,7 @@ public class DayOffReservations {
             released.add(r);
             repository.delete(r);
             repository.flush();
-            scheduleService.revokeApprovedDayOff(e, r.getOffDate());
+            scheduleService.revokeApprovedDayOff(e, r.getOffDate(), byManager);
             extra--;
         }
         return released;
@@ -394,6 +408,9 @@ public class DayOffReservations {
     public void moveAside(DayOffRequest reservedDay) {
         Employee other = reservedDay.getEmployee();
         LocalDate date = reservedDay.getOffDate();
+        if (made(other.getArea() == null ? null : other.getArea().getId(), DayOffService.weekStart(date))) {
+            return; // The week's schedule is made: colleagues keep their days; the manager decides.
+        }
         repository.delete(reservedDay);
         repository.flush();
         scheduleService.revokeApprovedDayOff(other, date);
@@ -427,6 +444,14 @@ public class DayOffReservations {
     }
 
     /** Whether that week's schedule is published (published weeks keep the days off they were published with). */
+    /**
+     * The week's schedule has been generated (draft or published). From then on it's the manager's: the system no
+     * longer reserves, moves or gives back days off in that week.
+     */
+    public boolean made(Long areaId, LocalDate weekStart) {
+        return areaId != null && scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart).isPresent();
+    }
+
     public boolean published(Long areaId, LocalDate weekStart) {
         return areaId != null && scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
                 .map(w -> w.getStatus() == ScheduleStatus.PUBLISHED).orElse(false);

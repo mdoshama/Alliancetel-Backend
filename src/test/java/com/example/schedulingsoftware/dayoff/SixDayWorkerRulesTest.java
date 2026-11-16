@@ -108,21 +108,17 @@ class SixDayWorkerRulesTest {
         scheduleService.publish(scheduleService.generate(area, week, true).id());
         assertEquals(1, daysOff(anna).size(), "the published schedule gives Monday");
 
+        // The week is made: another day is no longer swapped by the system; it's an emergency for the manager.
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
-        var asked = dayOffService.create(new CreateDayOffRequest(anna, List.of(week.plusDays(2)), null, null));
-        assertEquals(DayOffStatus.APPROVED, asked.getFirst().status(), "a normal request, given (not an emergency)");
-        assertTrue(!asked.getFirst().emergency());
-        assertEquals(List.of(week.plusDays(2)), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList(),
-                "Monday swapped for Wednesday");
+        assertThrows(BusinessRuleException.class,
+                () -> dayOffService.create(new CreateDayOffRequest(anna, List.of(week.plusDays(2)), null, null)));
+        var urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(week.plusDays(2)), "Urgent", true));
+        assertEquals(DayOffStatus.PENDING, urgent.getFirst().status());
         TestUsers.signInAsAdmin();
         var row = scheduleService.find(area, week).orElseThrow().rows().stream()
                 .filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
-        assertEquals("WORK", row.days().get(0).type().name(), "works Monday");
-        assertEquals("REQUESTED_OFF", row.days().get(2).type().name(), "off Wednesday");
-        // A second day is still not a normal request.
-        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
-        assertThrows(BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(anna, List.of(week.plusDays(4)), null, null)));
+        assertEquals("REQUESTED_OFF", row.days().get(0).type().name(), "still off Monday");
+        assertEquals("WORK", row.days().get(2).type().name(), "works Wednesday until a manager decides");
     }
 
     @Test

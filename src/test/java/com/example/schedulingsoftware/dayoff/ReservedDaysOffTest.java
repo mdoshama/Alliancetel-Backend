@@ -297,22 +297,20 @@ class ReservedDaysOffTest {
     }
 
     @Test
-    void aDaySheAsksForReplacesHerRegularDayThatWeek() {
+    void onceTheWeekIsMadeHerRequestGoesToTheManager() {
         LocalDate regular = futureDay(1);
         LocalDate other = futureDay(3);
         setRegular(anna, regular.getDayOfWeek());
         scheduleService.generate(area, week, true);
         assertEquals(com.example.schedulingsoftware.schedule.DayType.REQUESTED_OFF, dayType(anna, regular), "her regular day is off on the draft");
-        // Anna works 6 days. She asks for another day this week: it's given, and her regular day becomes a work day.
+        // The week is made: the system no longer gives or swaps days. She asks her manager, or sends an emergency.
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
-        var given = dayOffService.create(new CreateDayOffRequest(anna, List.of(other), null, null)).getFirst();
-        assertEquals(DayOffStatus.APPROVED, given.status());
+        var refused = assertThrows(com.example.schedulingsoftware.common.BusinessRuleException.class,
+                () -> dayOffService.create(new CreateDayOffRequest(anna, List.of(other), null, null)));
+        assertTrue(refused.getMessage().contains("already made"), refused.getMessage());
         TestUsers.signInAsAdmin();
-        assertNull(onDay(anna, regular), "regular day given back for this week");
-        assertEquals(com.example.schedulingsoftware.schedule.DayType.WORK, dayType(anna, regular), "and she works it on the schedule");
-        assertEquals(com.example.schedulingsoftware.schedule.DayType.REQUESTED_OFF, dayType(anna, other));
-        assertEquals(1, daysOff(anna).size(), "still her usual one day off");
-        // Her regular day stays her regular day for other weeks.
+        assertEquals(com.example.schedulingsoftware.schedule.DayType.REQUESTED_OFF, dayType(anna, regular), "nothing changed");
+        assertEquals(com.example.schedulingsoftware.schedule.DayType.WORK, dayType(anna, other));
         assertTrue(employeeService.getEmployee(anna).getRegularDaysOff().contains(regular.getDayOfWeek()));
     }
 

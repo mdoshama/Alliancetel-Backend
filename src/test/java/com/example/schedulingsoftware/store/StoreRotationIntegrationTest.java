@@ -413,14 +413,19 @@ class StoreRotationIntegrationTest {
     }
 
     @Test
-    void anApprovedDayOffCannotBeDraggedAway() {
+    void theManagerCanMoveAnApprovedDayOffOnTheMadeWeek() {
         LocalDate wed = monday.plusDays(2);
         dayOffService.create(new CreateDayOffRequest(ana, List.of(wed), null, null)); // given right away
         ScheduleResponse s = scheduleService.generate(area, monday);
         DayCell approved = row(s, ana).days().stream().filter(c -> c.date().equals(wed)).findFirst().orElseThrow();
         DayCell work = row(s, ana).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
         assertEquals(DayType.REQUESTED_OFF, approved.type());
-        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), approved.entryId(), work.entryId(), null));
+        // The week is the manager's: the day off moves, and Wednesday's request is deleted (she works Wednesday).
+        ScheduleResponse moved = scheduleService.exchange(s.id(), approved.entryId(), work.entryId(), null);
+        assertEquals(DayType.WORK, row(moved, ana).days().stream().filter(c -> c.date().equals(wed)).findFirst()
+                .orElseThrow().type());
+        assertEquals(DayType.OFF, row(moved, ana).days().stream().filter(c -> c.date().equals(work.date())).findFirst()
+                .orElseThrow().type());
     }
 
     @Test

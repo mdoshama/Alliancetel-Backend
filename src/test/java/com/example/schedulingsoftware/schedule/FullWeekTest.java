@@ -99,9 +99,9 @@ class FullWeekTest {
         assertEquals(7, row.expectedWorkDays());
         assertEquals(7, row.scheduledWorkDays());
 
-        // Back to her usual week: a day is reserved again.
+        // Back to her usual week: the week is already made, so the system reserves nothing; the manager gives her a day.
         fullWeekService.set(ana, week, false);
-        assertEquals(1, anasDays());
+        assertEquals(0, anasDays());
         assertTrue(weekRequests.status(area, week).fullWeek().isEmpty());
     }
 

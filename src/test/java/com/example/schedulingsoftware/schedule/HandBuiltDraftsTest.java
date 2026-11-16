@@ -143,7 +143,7 @@ class HandBuiltDraftsTest {
     }
 
     @Test
-    void workingOnAnApprovedDayOffInTheEmptyDraftTurnsItDownWhenPublished() {
+    void workingOnAnApprovedDayOffInTheEmptyDraftDeletesItWhenPublished() {
         LocalDate wed = week.plusDays(2);
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
         Long request = dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null)).getFirst().id();
@@ -154,8 +154,8 @@ class HandBuiltDraftsTest {
 
         ScheduleResponse published = scheduleService.publish(scheduleService.fillBlanks(draft.id()).id());
         assertEquals(DayType.WORK, row(published, anna).days().get(2).type(), "the manager's decision is published");
-        assertEquals(com.example.schedulingsoftware.dayoff.DayOffStatus.REJECTED,
-                dayOffService.page(area, anna, null, wed, wed, null, 0, 10).content().getFirst().status());
+        assertTrue(dayOffService.page(area, anna, null, wed, wed, null, 0, 10).content().isEmpty(),
+                "she works it: that day off is deleted");
         assertTrue(request != null);
     }
 

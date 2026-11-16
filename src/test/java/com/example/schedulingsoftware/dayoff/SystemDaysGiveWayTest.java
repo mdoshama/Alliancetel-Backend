@@ -107,7 +107,7 @@ class SystemDaysGiveWayTest {
     }
 
     @Test
-    void aColleaguesSystemDayMovesForARealRequestAfterTheWeekIsGenerated() {
+    void afterTheWeekIsGeneratedAColleaguesDayNoLongerMoves() {
         reservations.reserveWeek(area, week);
         // The week is generated: the system's picks are now given (approved by the system).
         scheduleService.generate(area, week, true);
@@ -119,19 +119,14 @@ class SystemDaysGiveWayTest {
         DayOffResponse safwan = dayOffService.create(new CreateDayOffRequest(primary, List.of(monday), null, false))
                 .getFirst();
 
-        assertEquals(DayOffStatus.APPROVED, safwan.status(), "given, not turned down: " + safwan.reviewNote());
-        // Zakir gets another day, already on the draft schedule, and works the day Safwan took.
+        assertEquals(DayOffStatus.APPROVED, safwan.status(), "given by the admin: " + safwan.reviewNote());
+        // The week is made: Zakir keeps his day; the manager sorts out the store on the schedule if needed.
         List<DayOffRequest> zakir = live(secondary);
-        assertEquals(1, zakir.size(), "Zakir still has exactly one day off");
-        LocalDate newDay = zakir.getFirst().getOffDate();
-        assertFalse(newDay.equals(monday));
-        assertEquals(DayOffStatus.APPROVED, zakir.getFirst().getStatus());
+        assertEquals(1, zakir.size());
+        assertEquals(monday, zakir.getFirst().getOffDate());
         ScheduleResponse s = scheduleService.find(area, week).orElseThrow();
         assertEquals(DayType.REQUESTED_OFF, cell(s, primary, monday));
-        assertEquals(DayType.WORK, cell(s, secondary, monday));
-        assertEquals(DayType.REQUESTED_OFF, cell(s, secondary, newDay));
-        // Safwan's own system day (if he had one elsewhere) is gone: one day off each.
-        assertEquals(1, live(primary).size());
+        assertEquals(DayType.REQUESTED_OFF, cell(s, secondary, monday));
     }
 
     @Test
@@ -141,10 +136,9 @@ class SystemDaysGiveWayTest {
         scheduleService.publish(s.id());
         LocalDate zakirsDay = live(secondary).getFirst().getOffDate();
 
-        // On a published week Zakir keeps his day, so the same store can't have both off: Safwan picks another day.
-        var refused = assertThrows(com.example.schedulingsoftware.common.BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(primary, List.of(zakirsDay), null, false)));
-        assertTrue(refused.getMessage().contains("Only one person per store"), refused.getMessage());
+        // Zakir keeps his day. An admin giving Safwan the same day decides it: both are off, nothing else moves.
+        assertEquals(DayOffStatus.APPROVED, dayOffService.create(
+                new CreateDayOffRequest(primary, List.of(zakirsDay), null, false)).getFirst().status());
         assertEquals(zakirsDay, live(secondary).getFirst().getOffDate());
     }
 
@@ -176,16 +170,16 @@ class SystemDaysGiveWayTest {
         scheduleService.generate(area, week, true);
         assertTrue(requests.findById(held.getId()).orElseThrow().isGivenBySystem());
 
-        // Surror (floater) asks for that day: no emergency needed, Hasham's pick moves.
+        // The week is made: an admin giving Surror that day decides it; Hasham's pick doesn't move by itself.
         DayOffResponse r = dayOffService.create(new CreateDayOffRequest(surror, List.of(day), null, false)).getFirst();
 
         assertEquals(DayOffStatus.APPROVED, r.status(), "given straight away: " + r.reviewNote());
         assertFalse(r.emergency());
         List<DayOffRequest> hashams = live(hasham);
         assertEquals(1, hashams.size(), "Hasham still has his one day");
-        assertFalse(hashams.getFirst().getOffDate().equals(day), "on another day");
+        assertTrue(hashams.getFirst().getOffDate().equals(day), "on the same day");
         ScheduleResponse s = scheduleService.find(area, week).orElseThrow();
-        assertEquals(DayType.WORK, cell(s, hasham, day));
-        assertTrue(s.coverageGaps().stream().noneMatch(g -> g.date().equals(day)), "the stores stay covered that day");
+        assertEquals(DayType.REQUESTED_OFF, cell(s, hasham, day));
+        assertEquals(DayType.REQUESTED_OFF, cell(s, surror, day));
     }
 }

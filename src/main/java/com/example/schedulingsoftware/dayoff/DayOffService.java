@@ -264,6 +264,18 @@ public class DayOffService {
         // weeks, or up to the date the area was opened until.
         checkNotThisWeek(dates, selfService);
         checkHorizon(employee, dates);
+        if (!emergency && !override && dates.stream().anyMatch(d -> scheduleService.weekMade(areaOf(employee), d))) {
+            // Once a week's schedule is made it's the manager's: the system gives nothing there by itself any more.
+            if (selfService) {
+                LocalDate made = dates.stream().filter(d -> scheduleService.weekMade(areaOf(employee), d)).findFirst()
+                        .orElseThrow();
+                throw new BusinessRuleException("The schedule for the week of " + shortDate(weekStart(made))
+                        + " is already made, so your manager decides now. For something urgent, send an emergency "
+                        + "request.");
+            }
+            // A manager or admin entering it for someone: that's their decision, given straight away.
+            override = true;
+        }
         if (selfService && emergency) {
             checkEmergencyOnlyWhenFull(employee, dates);
         }
@@ -704,6 +716,10 @@ public class DayOffService {
             if (rejectedOn(employee, date) && openForRequests(employee, date)) {
                 continue;
             }
+            // The week's schedule is made: only emergencies can be sent there.
+            if (scheduleService.weekMade(areaOf(employee), date)) {
+                continue;
+            }
             if (openForNormalRequest(employee, date)) {
                 throw new BusinessRuleException(dayName(date) + " is still open, so ask for it as a normal day off. "
                         + "Emergency requests are for days that are full, or once your days off that week are used.");
@@ -740,14 +756,14 @@ public class DayOffService {
         return days;
     }
 
-    /** Weeks (Mondays) from this week to {@code last} whose schedule is published in the area. */
+    /** Weeks (Mondays) from this week to {@code last} whose schedule is made (draft or published) in the area. */
     private List<LocalDate> publishedWeeks(Long areaId, LocalDate last) {
         if (areaId == null || last == null) {
             return List.of();
         }
         List<LocalDate> weeks = new ArrayList<>();
         for (LocalDate m = weekStart(portal.today()); !m.isAfter(last); m = m.plusWeeks(1)) {
-            if (reservations.published(areaId, m)) {
+            if (reservations.made(areaId, m)) {
                 weeks.add(m);
             }
         }
@@ -1075,27 +1091,29 @@ public class DayOffService {
         LocalDate date = r.getOffDate();
         // Reserved days of others give way to an approved request: a colleague at the same store, and others in the
         // area if the stores would otherwise be short that day. They get another day reserved.
+        // Once the week's schedule is made it's the manager's: colleagues' days don't move by themselves.
+        boolean made = scheduleService.weekMade(areaOf(e), date);
         List<DayOffRequest> aside = new ArrayList<>();
-        if (e.getHomeStore() != null) {
+        if (!made && e.getHomeStore() != null) {
             repository.findSameStore(e.getHomeStore().getId(), e.getId(), date, date, OPEN_STATUSES).stream()
                     .filter(this::movable).forEach(aside::add);
         }
         aside.forEach(reservations::moveAside);
-        for (DayOffRequest other : reservedOthersOn(e, date)) {
+        for (DayOffRequest other : made ? List.<DayOffRequest>of() : reservedOthersOn(e, date)) {
             if (!scheduleService.dayRoom(e, date, OPEN_STATUSES).full()) {
                 break;
             }
             aside.add(other);
             reservations.moveAside(other);
         }
-        // If that week's schedule was already made, the person must not stay scheduled to work that day.
-        String update = scheduleService.applyApprovedDayOff(e, date);
+        // A manager or admin approving it on a week that's already made: that day becomes their day off there.
+        String update = scheduleService.applyApprovedDayOff(e, date, notify);
         // Days held for them that week go back to work: the ones the system picked and, when they chose this day
         // themselves (not an emergency), their regular day too.
         String message = r.getReviewNote();
         // On a published week too: approving a day they chose (or their emergency) means the day the system held for
         // them goes, so they don't end up with an extra day off (an emergency leaves their regular day alone).
-        String back = releasedNote(reservations.trim(e, date, !r.isEmergency(), true));
+        String back = releasedNote(reservations.trim(e, date, !r.isEmergency(), true, notify));
         if (back != null) {
             message = message == null ? back : message + " " + back;
         }
@@ -1198,12 +1216,13 @@ public class DayOffService {
         r.setReviewedAt(Instant.now());
         repository.flush();
 
+        // A manager's decision: the made week follows it for this person's day (nobody else's day moves).
         String update = newStatus == DayOffStatus.APPROVED
-                ? scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate())
-                : scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate());
+                ? scheduleService.applyApprovedDayOff(r.getEmployee(), r.getOffDate(), true)
+                : scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate(), true);
         notifier.dayOffDecisionChanged(r, newStatus == DayOffStatus.APPROVED, why);
         if (newStatus == DayOffStatus.APPROVED) {
-            reservations.trim(r.getEmployee(), r.getOffDate(), !r.isEmergency());
+            reservations.trim(r.getEmployee(), r.getOffDate(), !r.isEmergency(), false, true);
         } else {
             reservations.refill(r.getEmployee(), r.getOffDate());
         }

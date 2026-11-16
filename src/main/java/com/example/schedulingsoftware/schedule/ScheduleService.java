@@ -93,10 +93,8 @@ public class ScheduleService {
         // Employees only see a week once their manager has published it.
         return scheduleRepository.findByAreaIdAndWeekStart(areaId, weekStart)
                 .filter(s -> !user.isEmployee() || s.getStatus() == ScheduleStatus.PUBLISHED)
-                .map(s -> {
-                    ensureApprovedDaysOff(s);
-                    return toResponse(s);
-                });
+                // Once made, the week is the manager's: it's shown exactly as they left it.
+                .map(this::toResponse);
     }
 
     /**
@@ -217,6 +215,26 @@ public class ScheduleService {
         if (emptyDraft && type == DayType.REQUESTED_OFF) {
             type = DayType.OFF;
         }
+        if (schedule.getKind() == ScheduleKind.MAIN) {
+            if (type == DayType.UNSET) {
+                throw new BusinessRuleException("Only a draft you build by hand can have empty days.");
+            }
+            // A made week is the manager's: they can change any day, an approved day off included (it's turned down,
+            // so the request and the schedule agree). Choosing Off on an approved day keeps it as that day off.
+            DayOffRequest approvedOff = dayOffRepository.findByEmployeeIdAndOffDate(entry.getEmployee().getId(),
+                    entry.getWorkDate()).filter(r -> r.getStatus() == DayOffStatus.APPROVED).orElse(null);
+            if (approvedOff != null && type != DayType.WORK) {
+                type = DayType.REQUESTED_OFF;
+            } else if (type == DayType.REQUESTED_OFF) {
+                type = DayType.OFF;
+            }
+            if (approvedOff != null && type == DayType.WORK) {
+                // They work it now: the day off (asked for, regular or given by the system) is gone.
+                dayOffRepository.delete(approvedOff);
+                dayOffRepository.flush();
+            }
+            emptyDraft = true; // From here on the same as the empty draft: no locks.
+        }
         if (!emptyDraft && type == DayType.WORK && hasApprovedDayOff(entry.getEmployee(), entry.getWorkDate())) {
             throw new BusinessRuleException(entry.getEmployee().getFirstName() + " has an approved day off on "
                     + dayName(entry.getWorkDate()) + ", so it can't be made a work day.");
@@ -257,8 +275,64 @@ public class ScheduleService {
         }
         entry.setManuallyEdited(true);
         entry.setAutoAssigned(false);
+        if (schedule.getKind() == ScheduleKind.MAIN && type != DayType.WORK) {
+            // A new day off on a made week replaces one they had: they keep their usual number of days off.
+            keepUsualDaysOff(schedule, entry);
+        }
         schedule.setUpdatedAt(Instant.now());
         return toResponse(schedule);
+    }
+
+    /**
+     * The manager gave {@code kept} as a day off on a made week. If the person now has more days off than they usually
+     * get (1 for a 6-day worker, none for someone working the full week), other days off go back to work, and their
+     * day-off requests are deleted: first a day the system picked, then their regular day, then a day they asked
+     * for, then one a manager gave earlier. An approved emergency is never taken away.
+     */
+    private void keepUsualDaysOff(WeeklySchedule schedule, ScheduleEntry kept) {
+        Employee person = kept.getEmployee();
+        boolean fullWeek = fullWeeks.findForArea(schedule.getArea().getId(), schedule.getWeekStart()).stream()
+                .anyMatch(f -> f.getEmployee().getId().equals(person.getId()));
+        int usual = fullWeek ? 0 : Math.max(0, 7 - person.getWorkDaysPerWeek());
+        List<ScheduleEntry> offs = schedule.getEntries().stream()
+                .filter(e -> e.getEmployee().getId().equals(person.getId()))
+                .filter(e -> e.getType() == DayType.OFF || e.getType() == DayType.REQUESTED_OFF)
+                .filter(e -> anyStoreOpen(schedule, e.getWorkDate()))
+                .toList();
+        int extra = offs.size() - usual;
+        if (extra <= 0) {
+            return;
+        }
+        Map<LocalDate, DayOffRequest> requests = new HashMap<>();
+        offs.forEach(e -> dayOffRepository.findByEmployeeIdAndOffDate(person.getId(), e.getWorkDate())
+                .ifPresent(r -> requests.put(e.getWorkDate(), r)));
+        List<ScheduleEntry> canGo = offs.stream()
+                .filter(e -> !e.getId().equals(kept.getId()))
+                .filter(e -> requests.get(e.getWorkDate()) == null || !requests.get(e.getWorkDate()).isEmergency())
+                .sorted(Comparator.<ScheduleEntry>comparingInt(e -> {
+                    DayOffRequest r = requests.get(e.getWorkDate());
+                    if (r == null) {
+                        return 3; // a day off a manager gave earlier
+                    }
+                    return r.isReserved() && !r.isRegular() ? 0 : r.isRegular() ? 1 : 2;
+                }).thenComparing(ScheduleEntry::getWorkDate))
+                .toList();
+        for (ScheduleEntry back : canGo) {
+            if (extra <= 0) {
+                break;
+            }
+            DayOffRequest r = requests.get(back.getWorkDate());
+            if (r != null) {
+                dayOffRepository.delete(r);
+                dayOffRepository.flush();
+            }
+            Store home = homeStoreOf(person);
+            back.setType(DayType.WORK);
+            back.setStore(home != null && home.isOpenOn(back.getWorkDate()) ? home : null);
+            back.setAutoAssigned(false);
+            back.setManuallyEdited(true);
+            extra--;
+        }
     }
 
     /**
@@ -315,7 +389,22 @@ public class ScheduleService {
         requireDraft(schedule);
         ScheduleEntry from = entry(schedule, fromEntryId);
         ScheduleEntry to = entry(schedule, toEntryId);
-        if (from.getType() == DayType.REQUESTED_OFF || to.getType() == DayType.REQUESTED_OFF) {
+        boolean ownDayOffMoves = schedule.getKind() == ScheduleKind.MAIN
+                && from.getEmployee().getId().equals(to.getEmployee().getId()) && storeId == null
+                && (from.getType() == DayType.WORK) != (to.getType() == DayType.WORK);
+        if (ownDayOffMoves) {
+            // On a made week the manager moves someone's day off (e.g. Monday to Tuesday): the old day's request (asked
+            // for, regular or given by the system) is deleted, so they aren't off on both days.
+            ScheduleEntry offDay = from.getType() == DayType.WORK ? to : from;
+            dayOffRepository.findByEmployeeIdAndOffDate(offDay.getEmployee().getId(), offDay.getWorkDate())
+                    .ifPresent(r -> {
+                        dayOffRepository.delete(r);
+                        dayOffRepository.flush();
+                    });
+            if (offDay.getType() == DayType.REQUESTED_OFF) {
+                offDay.setType(DayType.OFF);
+            }
+        } else if (from.getType() == DayType.REQUESTED_OFF || to.getType() == DayType.REQUESTED_OFF) {
             throw new BusinessRuleException("An approved day off can't be moved. Reject or change the request instead.");
         }
         DayType fromType = from.getType();
@@ -393,7 +482,6 @@ public class ScheduleService {
     public ScheduleResponse autoAssignStores(Long scheduleId) {
         WeeklySchedule schedule = getManaged(scheduleId);
         requireDraft(schedule);
-        syncApprovedDaysOff(schedule);
         assignStores(schedule);
         schedule.setUpdatedAt(Instant.now());
         return toResponse(schedule);
@@ -474,7 +562,6 @@ public class ScheduleService {
             return publishDraft(schedule);
         }
         requireDraft(schedule);
-        ensureApprovedDaysOff(schedule);
         schedule.setStatus(ScheduleStatus.PUBLISHED);
         schedule.setPublishedAt(Instant.now());
         // WhatsApp: everyone's week the first time; after changes, only the people whose days changed.
@@ -502,6 +589,13 @@ public class ScheduleService {
         schedule.setStatus(ScheduleStatus.DRAFT);
         schedule.setPublishedAt(null);
         return toResponse(schedule);
+    }
+
+    /** The week's schedule has been generated (draft or published): from then on it's the manager's. */
+    @Transactional(readOnly = true)
+    public boolean weekMade(Long areaId, LocalDate anyDayInWeek) {
+        return areaId != null
+                && scheduleRepository.findByAreaIdAndWeekStart(areaId, DayOffService.weekStart(anyDayInWeek)).isPresent();
     }
 
     // ---------- Drafts built by hand ----------
@@ -756,18 +850,14 @@ public class ScheduleService {
         }
         Long areaId = draft.getArea().getId();
         if (draft.getKind() == ScheduleKind.EMPTY) {
-            // The manager scheduled someone to work on a day they had off: that day off is turned down, so the
-            // published week keeps the manager's decision (they see the change with their week).
+            // The manager scheduled someone to work on a day they had off: that day off is deleted, so the published
+            // week keeps the manager's decision (they see the change with their week).
             Map<String, DayType> placed = new HashMap<>();
             draft.getEntries().forEach(d -> placed.put(d.getEmployee().getId() + "|" + d.getWorkDate(), d.getType()));
-            String by = accessPolicy.current().fullName();
             for (DayOffRequest r : dayOffRepository.findForArea(areaId, DayOffStatus.APPROVED, draft.getWeekStart(),
                     draft.getWeekEnd())) {
                 if (placed.get(r.getEmployee().getId() + "|" + r.getOffDate()) == DayType.WORK) {
-                    r.setStatus(DayOffStatus.REJECTED);
-                    r.setReviewNote("Scheduled to work by " + by + ".");
-                    r.setReviewedAt(Instant.now());
-                    r.setReviewedBy(by);
+                    dayOffRepository.delete(r);
                 }
             }
             dayOffRepository.flush();
@@ -835,7 +925,16 @@ public class ScheduleService {
      */
     @Transactional
     public String applyApprovedDayOff(Employee employee, LocalDate date) {
-        if (employee.getArea() == null) {
+        return applyApprovedDayOff(employee, date, false);
+    }
+
+    /**
+     * @param byManager a manager or admin decided on this request just now. Only then does a schedule that's already
+     *                  made change: once made, the week is theirs, and the system doesn't change it by itself.
+     */
+    @Transactional
+    public String applyApprovedDayOff(Employee employee, LocalDate date, boolean byManager) {
+        if (employee.getArea() == null || !byManager) {
             return null;
         }
         Optional<WeeklySchedule> found = scheduleRepository
@@ -880,7 +979,13 @@ public class ScheduleService {
      */
     @Transactional
     public String revokeApprovedDayOff(Employee employee, LocalDate date) {
-        if (employee.getArea() == null) {
+        return revokeApprovedDayOff(employee, date, false);
+    }
+
+    /** @param byManager see {@link #applyApprovedDayOff(Employee, LocalDate, boolean)} */
+    @Transactional
+    public String revokeApprovedDayOff(Employee employee, LocalDate date, boolean byManager) {
+        if (employee.getArea() == null || !byManager) {
             return null;
         }
         Optional<WeeklySchedule> found = scheduleRepository

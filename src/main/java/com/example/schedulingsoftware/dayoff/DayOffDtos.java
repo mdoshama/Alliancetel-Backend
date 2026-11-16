@@ -60,8 +60,8 @@ public final class DayOffDtos {
              */
             LocalDate openUntil, String openUntilBy, LocalDate lastDate,
             /**
-             * Weeks (Mondays) whose schedule is already published in their area: the day off it gives them there stays,
-             * so picking another day that week is an emergency.
+             * Weeks (Mondays) whose schedule is already made in their area: the manager decides there, so a day off
+             * that week can only be asked for as an emergency.
              */
             List<LocalDate> publishedWeeks,
             /** The mode above is the area's own (its manager or an admin opened or closed it there), and which area. */

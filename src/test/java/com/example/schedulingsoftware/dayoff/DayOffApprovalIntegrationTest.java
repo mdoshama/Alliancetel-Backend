@@ -83,7 +83,7 @@ class DayOffApprovalIntegrationTest {
         assertEquals(7, row(s, anna).scheduledWorkDays(), "no automatic days off");
         DayCell workDay = workDayWithFullStaff(s, anna);
 
-        // A normal request that keeps the stores covered is given straight away by the system.
+        // The week is made: a day off a manager or admin enters is their decision, given straight away.
         DayOffResponse approved = dayOffService.create(new CreateDayOffRequest(anna, List.of(workDay.date()), null, null)).getFirst();
         assertEquals(DayOffStatus.APPROVED, approved.status());
 
@@ -91,19 +91,19 @@ class DayOffApprovalIntegrationTest {
         assertTrue(approved.scheduleUpdate().contains("is now off"), approved.scheduleUpdate());
         ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
         assertEquals(DayType.REQUESTED_OFF, day(after, anna, workDay.date()).type());
-        assertEquals("REQUESTED", day(after, anna, workDay.date()).offSource());
+        assertEquals("MANAGER", day(after, anna, workDay.date()).offSource());
         assertNull(day(after, anna, workDay.date()).storeId());
         // The approved day is simply her day off: no other day changes.
         assertEquals(6, row(after, anna).scheduledWorkDays());
         assertTrue(!approved.scheduleUpdate().contains("regular"), approved.scheduleUpdate());
 
-        // Auto-fill and manual edits can't put her back to work that day.
+        // Auto-fill keeps it; the manager can still put her back to work (the day off is then turned down).
         ScheduleResponse filled = scheduleService.autoAssignStores(after.id());
         assertEquals(DayType.REQUESTED_OFF, day(filled, anna, workDay.date()).type());
         Long entry = day(filled, anna, workDay.date()).entryId();
-        BusinessRuleException e = assertThrows(BusinessRuleException.class,
-                () -> scheduleService.updateEntry(after.id(), entry, DayType.WORK, store));
-        assertTrue(e.getMessage().contains("approved day off"), e.getMessage());
+        assertEquals(DayType.WORK, day(scheduleService.updateEntry(after.id(), entry, DayType.WORK, store), anna,
+                workDay.date()).type());
+        assertTrue(dayOffRequestRepository.findById(approved.id()).isEmpty(), "she works it: the day off is deleted");
     }
 
     @Test
@@ -156,9 +156,6 @@ class DayOffApprovalIntegrationTest {
         LocalDate date = workDayWithFullStaff(s, anna).date();
         // An emergency waits for a decision (normal requests are given or refused straight away).
         Long annaRequest = dayOffService.create(new CreateDayOffRequest(anna, List.of(date), "Urgent", true)).getFirst().id();
-        // A normal request for the same day at the same store is refused; an emergency one is allowed.
-        assertThrows(BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(ben, List.of(date), null, null)));
         dayOffService.create(new CreateDayOffRequest(ben, List.of(date), "Family emergency", true));
 
         // 3 working, minimum 2: after approving, 2 are left for 2 needed.
@@ -198,9 +195,7 @@ class DayOffApprovalIntegrationTest {
         assertTrue(impact.existingShortages() > 0);
 
         LocalDate workDay = workDayWithFullStaff(s, anna).date();
-        // A normal request is refused (the day is full); an emergency one still goes to the manager.
-        assertThrows(BusinessRuleException.class,
-                () -> dayOffService.create(new CreateDayOffRequest(anna, List.of(workDay), null, null)));
+        // An emergency one still goes to the manager.
         Long second = dayOffService.create(new CreateDayOffRequest(anna, List.of(workDay), null, true)).getFirst().id();
         DayOffImpact worse = scheduleService.dayOffImpact(second);
         assertEquals(ImpactLevel.SHORT, worse.level(), "3 of 4 becoming 2 of 4 is worse, even though it was short already");
@@ -272,12 +267,18 @@ class DayOffApprovalIntegrationTest {
         // Anna is given Wednesday off on the schedule, so only Ben and Cara work then: nobody else can go.
         ScheduleResponse s = dayOff(dayOff(scheduleService.generate(area, monday), anna, 2), cara, 4);
         LocalDate busy = monday.plusDays(2);
+        // The week is made: Cara can't be given a day by the system any more; she asks her manager (or an emergency).
+        TestUsers.signInAs(cara, Role.EMPLOYEE, area);
         BusinessRuleException e = assertThrows(BusinessRuleException.class,
                 () -> dayOffService.create(new CreateDayOffRequest(cara, List.of(busy), null, null)));
-        assertTrue(e.getMessage().contains("is full"), e.getMessage());
-        // Asking for a day you already have off in the schedule is always fine.
+        assertTrue(e.getMessage().contains("already made"), e.getMessage());
+        assertEquals(DayOffStatus.PENDING,
+                dayOffService.create(new CreateDayOffRequest(cara, List.of(busy), "Urgent", true)).getFirst().status());
+        // The manager decides: given straight away.
+        TestUsers.signInAsAdmin();
         LocalDate caraOff = row(s, cara).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow().date();
-        dayOffService.create(new CreateDayOffRequest(cara, List.of(caraOff), null, null));
+        assertEquals(DayOffStatus.APPROVED,
+                dayOffService.create(new CreateDayOffRequest(cara, List.of(caraOff), null, null)).getFirst().status());
     }
 
     @Test
@@ -353,25 +354,25 @@ class DayOffApprovalIntegrationTest {
     }
 
     @Test
-    void anApprovedDayOffAlwaysShowsAsOffOnTheSchedule() {
+    void aMadeWeekIsTheManagersAndTheSystemDoesntChangeIt() {
         LocalDate thu = monday.plusDays(3);
         Long request = dayOffService.create(new CreateDayOffRequest(anna, List.of(thu), "Urgent", true)).getFirst().id();
         ScheduleResponse s = scheduleService.generate(area, monday);
         assertEquals(DayType.WORK, day(s, anna, thu).type(), "pending emergency: still working");
 
-        // Approved without going through approve() (e.g. data from before this rule): opening the week fixes it.
+        // Approved without a manager's decision (e.g. old data): opening the week doesn't change it by itself.
         DayOffRequest r = dayOffRequestRepository.findById(request).orElseThrow();
         r.setStatus(DayOffStatus.APPROVED);
         ScheduleResponse opened = scheduleService.find(area, monday).orElseThrow();
-        assertEquals(DayType.REQUESTED_OFF, day(opened, anna, thu).type());
-        assertNull(day(opened, anna, thu).storeId());
+        assertEquals(DayType.WORK, day(opened, anna, thu).type());
 
-        // It can't be changed by hand, and nobody can be marked "approved off" without a request.
+        // The manager decides: Off on her approved day keeps it as that day off; Off for Ben is a plain day off.
         Long entry = day(opened, anna, thu).entryId();
-        assertThrows(BusinessRuleException.class, () -> scheduleService.updateEntry(opened.id(), entry, DayType.OFF, null));
+        assertEquals(DayType.REQUESTED_OFF,
+                day(scheduleService.updateEntry(opened.id(), entry, DayType.OFF, null), anna, thu).type());
         Long benThu = day(opened, ben, thu).entryId();
-        assertThrows(BusinessRuleException.class,
-                () -> scheduleService.updateEntry(opened.id(), benThu, DayType.REQUESTED_OFF, null));
+        assertEquals(DayType.OFF,
+                day(scheduleService.updateEntry(opened.id(), benThu, DayType.REQUESTED_OFF, null), ben, thu).type());
     }
 
     @Test
