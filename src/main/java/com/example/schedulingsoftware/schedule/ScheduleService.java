@@ -522,7 +522,11 @@ public class ScheduleService {
     public ScheduleResponse saveDraft(Long scheduleId) {
         WeeklySchedule schedule = getManaged(scheduleId);
         requireDraft(schedule);
-        ensureApprovedDaysOff(schedule);
+        // Saving stores the week exactly as the manager left it. Only the days-off draft (still being planned) picks
+        // up days off approved since; the empty draft and a generated week are the manager's.
+        if (schedule.getKind() == ScheduleKind.DAYS_OFF) {
+            ensureApprovedDaysOff(schedule);
+        }
         schedule.markDraftSaved();
         return toResponse(schedule);
     }

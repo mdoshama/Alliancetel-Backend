@@ -159,6 +159,39 @@ class HandBuiltDraftsTest {
     }
 
     @Test
+    void savingOrReopeningTheEmptyDraftNeverAddsDaysOff() {
+        LocalDate wed = week.plusDays(2);
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null));
+        TestUsers.signInAsAdmin();
+        ScheduleResponse draft = scheduleService.createDraft(area, week, ScheduleKind.EMPTY);
+        // The manager gives Anna Monday off and puts her at North on Wednesday (her approved day).
+        scheduleService.updateEntry(draft.id(), row(draft, anna).days().getFirst().entryId(), DayType.OFF, null);
+        scheduleService.updateEntry(draft.id(), row(draft, anna).days().get(2).entryId(), DayType.WORK, north);
+
+        ScheduleResponse saved = scheduleService.saveDraft(draft.id());
+        ScheduleResponse reopened = scheduleService.findDraft(area, week, ScheduleKind.EMPTY).orElseThrow();
+        for (ScheduleResponse s : List.of(saved, reopened)) {
+            assertEquals(DayType.OFF, row(s, anna).days().getFirst().type());
+            assertEquals(DayType.WORK, row(s, anna).days().get(2).type(), "her approved day stays a work day");
+            assertEquals(26, s.blankDays(), "nothing else filled in");
+        }
+    }
+
+    @Test
+    void savingTheGeneratedWeekKeepsTheManagersChanges() {
+        LocalDate wed = week.plusDays(2);
+        ScheduleResponse main = scheduleService.generate(area, week, true);
+        scheduleService.updateEntry(main.id(), row(main, anna).days().get(2).entryId(), DayType.WORK, north);
+        // An approval that didn't come through a manager (e.g. old data) doesn't change the saved week.
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        TestUsers.signInAsAdmin();
+        ScheduleResponse saved = scheduleService.saveDraft(main.id());
+        assertEquals(DayType.WORK, row(saved, anna).days().get(2).type());
+        assertEquals(wed, row(saved, anna).days().get(2).date());
+    }
+
+    @Test
     void workingOnAnApprovedDayOffInTheEmptyDraftDeletesItWhenPublished() {
         LocalDate wed = week.plusDays(2);
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
