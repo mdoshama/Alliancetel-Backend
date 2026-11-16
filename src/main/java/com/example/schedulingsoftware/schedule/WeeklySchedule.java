@@ -27,10 +27,14 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** One schedule per area per week. The week always starts on Monday. */
+/**
+ * One schedule per area, week and kind: the main one, plus the drafts a manager builds by hand (see
+ * {@link ScheduleKind}). The week always starts on Monday.
+ */
 @Entity
 @Table(name = "weekly_schedules",
-        uniqueConstraints = @UniqueConstraint(name = "uk_schedule_area_week", columnNames = {"area_id", "week_start"}))
+        uniqueConstraints = @UniqueConstraint(name = "uk_schedule_area_week_kind",
+                columnNames = {"area_id", "week_start", "kind"}))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -61,6 +65,12 @@ public class WeeklySchedule {
      * and cleared when the draft is rebuilt from scratch.
      */
     private Instant draftSavedAt;
+
+    /** Main schedule or one of the hand-built drafts. */
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @org.hibernate.annotations.ColumnDefault("'MAIN'")
+    private ScheduleKind kind = ScheduleKind.MAIN;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

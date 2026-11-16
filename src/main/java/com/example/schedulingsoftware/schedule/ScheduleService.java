@@ -224,7 +224,17 @@ public class ScheduleService {
             throw new BusinessRuleException("An approved day off comes from approving a day-off request. Choose Off "
                     + "to give " + entry.getEmployee().getFirstName() + " the day off.");
         }
+        if (type == DayType.UNSET && schedule.getKind() == ScheduleKind.MAIN) {
+            throw new BusinessRuleException("Only a draft you build by hand can have empty days.");
+        }
         entry.setType(type);
+        if (type == DayType.UNSET) {
+            entry.setStore(null);
+            entry.setManuallyEdited(false);
+            entry.setAutoAssigned(false);
+            schedule.setUpdatedAt(Instant.now());
+            return toResponse(schedule);
+        }
         if (type != DayType.WORK) {
             entry.setStore(null);
         } else if (storeId != null) {
@@ -454,6 +464,9 @@ public class ScheduleService {
     @Transactional
     public ScheduleResponse publish(Long scheduleId) {
         WeeklySchedule schedule = getManaged(scheduleId);
+        if (schedule.getKind() != ScheduleKind.MAIN) {
+            return publishDraft(schedule);
+        }
         requireDraft(schedule);
         ensureApprovedDaysOff(schedule);
         schedule.setStatus(ScheduleStatus.PUBLISHED);
@@ -483,6 +496,291 @@ public class ScheduleService {
         schedule.setStatus(ScheduleStatus.DRAFT);
         schedule.setPublishedAt(null);
         return toResponse(schedule);
+    }
+
+    // ---------- Drafts built by hand ----------
+
+    /** The week's draft of that kind (managers and admins), or empty when it hasn't been started. */
+    @Transactional
+    public Optional<ScheduleResponse> findDraft(Long areaId, LocalDate anyDayInWeek, ScheduleKind kind) {
+        accessPolicy.requireManagerOf(areaId);
+        return scheduleRepository.findByAreaIdAndWeekStartAndKind(areaId, DayOffService.weekStart(anyDayInWeek), kind)
+                .map(s -> {
+                    if (s.getKind() != ScheduleKind.MAIN) {
+                        unlockRevokedDaysOff(s);
+                    }
+                    ensureApprovedDaysOff(s);
+                    return toResponse(s);
+                });
+    }
+
+    /** The week's schedules (main and drafts), for the tabs. */
+    @Transactional(readOnly = true)
+    public List<ScheduleDtos.DraftSummary> drafts(Long areaId, LocalDate anyDayInWeek) {
+        accessPolicy.requireManagerOf(areaId);
+        return scheduleRepository.findByAreaIdAndWeekStartOrderByKindAsc(areaId, DayOffService.weekStart(anyDayInWeek))
+                .stream()
+                .map(s -> new ScheduleDtos.DraftSummary(s.getId(), s.getKind(), s.getStatus(),
+                        (int) s.getEntries().stream().filter(e -> e.getType() == DayType.UNSET).count(),
+                        s.getUpdatedAt()))
+                .toList();
+    }
+
+    /**
+     * Starts (or starts over) a draft built by hand. {@link ScheduleKind#EMPTY}: every day blank, except approved days
+     * off (locked: nobody works on a day they were given off) and days every store is closed. {@link
+     * ScheduleKind#DAYS_OFF}: the same, plus each person's regular day off. The main schedule isn't touched.
+     */
+    @Transactional
+    public ScheduleResponse createDraft(Long areaId, LocalDate anyDayInWeek, ScheduleKind kind) {
+        if (kind == null || kind == ScheduleKind.MAIN) {
+            throw new BusinessRuleException("Pick the empty draft or the days-off draft.");
+        }
+        LocalDate weekStart = DayOffService.weekStart(anyDayInWeek);
+        accessPolicy.requireManagerOf(areaId);
+        pastWeekLock.requireOpen(areaId, weekStart);
+        LocalDate today = LocalDate.now();
+        if (weekStart.isAfter(today.plusYears(1)) || weekStart.isBefore(today.minusYears(1))) {
+            throw new BusinessRuleException("Schedules can be made for weeks up to a year ahead or back.");
+        }
+        Area area = areaService.getArea(areaId);
+        if (!area.isActive()) {
+            throw new BusinessRuleException("Area '" + area.getName() + "' is inactive.");
+        }
+        List<Employee> staff = employeeRepository
+                .findByAreaIdAndActiveTrueAndRoleInOrderByLastNameAscFirstNameAsc(areaId, SCHEDULED_ROLES).stream()
+                .filter(Employee::worksShifts).toList();
+        if (staff.isEmpty()) {
+            throw new BusinessRuleException("Area '" + area.getName() + "' has no active staff to schedule.");
+        }
+        WeeklySchedule draft = scheduleRepository.findByAreaIdAndWeekStartAndKind(areaId, weekStart, kind)
+                .orElseGet(() -> {
+                    WeeklySchedule s = new WeeklySchedule();
+                    s.setArea(area);
+                    s.setWeekStart(weekStart);
+                    s.setKind(kind);
+                    return scheduleRepository.save(s);
+                });
+        draft.getEntries().clear();
+        draft.setDraftSavedAt(null);
+        draft.setStatus(ScheduleStatus.DRAFT);
+        scheduleRepository.flush();
+
+        Map<Long, Set<LocalDate>> approved = dayOffRepository
+                .findForArea(areaId, DayOffStatus.APPROVED, weekStart, draft.getWeekEnd()).stream()
+                .collect(Collectors.groupingBy(r -> r.getEmployee().getId(),
+                        Collectors.mapping(DayOffRequest::getOffDate, Collectors.toSet())));
+        Set<Long> fullWeek = fullWeeks.findForArea(areaId, weekStart).stream()
+                .map(f -> f.getEmployee().getId()).collect(Collectors.toSet());
+        List<Store> open = storeRepository.findByAreaIdOrderByNameAsc(areaId).stream().filter(Store::isActive).toList();
+        for (Employee e : staff) {
+            for (LocalDate date : weekDates(draft)) {
+                DayType type = DayType.UNSET;
+                if (!open.isEmpty() && open.stream().noneMatch(st -> st.isOpenOn(date))) {
+                    type = DayType.OFF;
+                } else if (approved.getOrDefault(e.getId(), Set.of()).contains(date)) {
+                    type = DayType.REQUESTED_OFF;
+                } else if (kind == ScheduleKind.DAYS_OFF && !fullWeek.contains(e.getId())
+                        && e.getRegularDaysOff().contains(date.getDayOfWeek())) {
+                    type = DayType.OFF;
+                }
+                draft.getEntries().add(new ScheduleEntry(draft, e, date, type, null));
+            }
+        }
+        draft.setUpdatedAt(Instant.now());
+        scheduleRepository.flush();
+        return toResponse(draft);
+    }
+
+    /**
+     * Lets the system finish a draft built by hand, by the same rules as Generate. What the manager already decided
+     * stays. Each person gets the days off their week still needs (their usual number, or none for a full week) on
+     * blank days: first days the stores can spare them, then their regular day or the day the system planned for
+     * them, then the day with the most people
+     * spare, avoiding two people of the same store being off together. Every other blank day becomes a work day, and
+     * stores are filled (primaries at their store, secondaries covering, floaters only at their stores).
+     */
+    @Transactional
+    public ScheduleResponse fillBlanks(Long scheduleId) {
+        WeeklySchedule schedule = getManaged(scheduleId);
+        requireDraft(schedule);
+        unlockRevokedDaysOff(schedule);
+        ensureApprovedDaysOff(schedule);
+        Long areaId = schedule.getArea().getId();
+        List<LocalDate> dates = weekDates(schedule);
+        List<Store> areaStores = storeRepository.findByAreaIdOrderByNameAsc(areaId);
+        List<Store> active = areaStores.stream().filter(Store::isActive).toList();
+        Set<LocalDate> openDays = dates.stream()
+                .filter(d -> active.isEmpty() || active.stream().anyMatch(st -> st.isOpenOn(d)))
+                .collect(Collectors.toSet());
+        Set<Long> fullWeek = fullWeeks.findForArea(areaId, schedule.getWeekStart()).stream()
+                .map(f -> f.getEmployee().getId()).collect(Collectors.toSet());
+
+        Map<Long, List<ScheduleEntry>> byEmployee = new LinkedHashMap<>();
+        Map<LocalDate, Set<Long>> off = new HashMap<>();
+        dates.forEach(d -> off.put(d, new HashSet<>()));
+        for (ScheduleEntry e : schedule.getEntries()) {
+            byEmployee.computeIfAbsent(e.getEmployee().getId(), k -> new ArrayList<>()).add(e);
+            if (e.getType() == DayType.UNSET && !openDays.contains(e.getWorkDate())) {
+                e.setType(DayType.OFF); // Every store is closed: nobody works.
+            }
+            if (e.getType() == DayType.OFF || e.getType() == DayType.REQUESTED_OFF) {
+                off.get(e.getWorkDate()).add(e.getEmployee().getId());
+            }
+        }
+        Coverage coverage = Coverage.of(areaStores,
+                byEmployee.values().stream().map(l -> l.getFirst().getEmployee()).toList());
+        // The days the system already planned as their day off (regular or picked), still waiting: tried first.
+        Set<String> planned = new HashSet<>();
+        for (LocalDate d : dates) {
+            dayOffRepository.findForAreaOnDate(areaId, d, List.of(DayOffStatus.PENDING)).stream()
+                    .filter(DayOffRequest::isReserved)
+                    .forEach(r -> planned.add(r.getEmployee().getId() + "|" + d));
+        }
+
+        // People with the fewest blank days choose first: they have the least room.
+        List<List<ScheduleEntry>> people = byEmployee.values().stream()
+                .sorted(Comparator.comparingInt(l -> (int) l.stream().filter(e -> e.getType() == DayType.UNSET).count()))
+                .toList();
+        for (List<ScheduleEntry> week : people) {
+            Employee person = week.getFirst().getEmployee();
+            int target = Math.min(fullWeek.contains(person.getId()) ? 7 : person.getWorkDaysPerWeek(), openDays.size());
+            long offAlready = week.stream().filter(e -> openDays.contains(e.getWorkDate())
+                    && (e.getType() == DayType.OFF || e.getType() == DayType.REQUESTED_OFF)).count();
+            long need = openDays.size() - target - offAlready;
+            for (int n = 0; n < need; n++) {
+                ScheduleEntry pick = week.stream()
+                        .filter(e -> e.getType() == DayType.UNSET)
+                        .min(Comparator.<ScheduleEntry>comparingInt(e ->
+                                        coverage.canBeOff(e.getWorkDate(), off.get(e.getWorkDate()), person.getId()) ? 0 : 1)
+                                .thenComparingInt(e -> sameStoreOff(person, off.get(e.getWorkDate()), byEmployee) ? 1 : 0)
+                                .thenComparingInt(e -> person.getRegularDaysOff().contains(e.getWorkDate().getDayOfWeek())
+                                        || planned.contains(person.getId() + "|" + e.getWorkDate()) ? 0 : 1)
+                                .thenComparingInt(e -> -spareWith(coverage, e.getWorkDate(), off.get(e.getWorkDate()), person.getId()))
+                                .thenComparing(ScheduleEntry::getWorkDate))
+                        .orElse(null);
+                if (pick == null) {
+                    break;
+                }
+                pick.setType(DayType.OFF);
+                pick.setStore(null);
+                off.get(pick.getWorkDate()).add(person.getId());
+            }
+        }
+        for (ScheduleEntry e : schedule.getEntries()) {
+            if (e.getType() == DayType.UNSET) {
+                e.setType(DayType.WORK);
+                e.setStore(null);
+                e.setAutoAssigned(false);
+                e.setManuallyEdited(false);
+            }
+        }
+        assignStores(schedule);
+        schedule.setUpdatedAt(Instant.now());
+        scheduleRepository.flush();
+        return toResponse(schedule);
+    }
+
+    /** People working that day beyond what the stores need, if this person were off too. */
+    private static int spareWith(Coverage coverage, LocalDate date, Set<Long> off, Long employeeId) {
+        Set<Long> more = new HashSet<>(off);
+        more.add(employeeId);
+        return coverage.day(date, more).spare();
+    }
+
+    /** Someone else from this person's home store (not a floater) is already off that day. */
+    private static boolean sameStoreOff(Employee person, Set<Long> off, Map<Long, List<ScheduleEntry>> byEmployee) {
+        Store home = homeStoreOf(person);
+        if (home == null) {
+            return false;
+        }
+        return off.stream().filter(id -> !id.equals(person.getId())).map(byEmployee::get)
+                .filter(java.util.Objects::nonNull)
+                .map(l -> homeStoreOf(l.getFirst().getEmployee()))
+                .anyMatch(st -> st != null && st.getId().equals(home.getId()));
+    }
+
+    /** A day off that was revoked after the draft was made goes back to blank (it was never decided in the draft). */
+    private void unlockRevokedDaysOff(WeeklySchedule draft) {
+        Set<String> approved = dayOffRepository.findForArea(draft.getArea().getId(), DayOffStatus.APPROVED,
+                draft.getWeekStart(), draft.getWeekEnd()).stream()
+                .map(r -> r.getEmployee().getId() + "|" + r.getOffDate()).collect(Collectors.toSet());
+        for (ScheduleEntry e : draft.getEntries()) {
+            if (e.getType() == DayType.REQUESTED_OFF && !approved.contains(e.getEmployee().getId() + "|" + e.getWorkDate())) {
+                e.setType(DayType.UNSET);
+                e.setStore(null);
+            }
+        }
+    }
+
+    /**
+     * Publishes a draft built by hand: it becomes the week's schedule. Every day must be decided first. The main
+     * schedule takes its days (made if there's none; a published one is updated, so only people whose days changed
+     * hear about it), the draft stays as it is, and the days the system was holding for people that week are settled:
+     * given where they're off, dropped where they work.
+     */
+    private ScheduleResponse publishDraft(WeeklySchedule draft) {
+        requireDraft(draft);
+        unlockRevokedDaysOff(draft);
+        ensureApprovedDaysOff(draft);
+        long blank = draft.getEntries().stream().filter(e -> e.getType() == DayType.UNSET).count();
+        if (blank > 0) {
+            throw new BusinessRuleException(blank + (blank == 1 ? " day is" : " days are") + " still empty. Fill "
+                    + (blank == 1 ? "it" : "them") + " in, or press \"Fill the rest\", before publishing.");
+        }
+        Long areaId = draft.getArea().getId();
+        WeeklySchedule main = scheduleRepository.findByAreaIdAndWeekStart(areaId, draft.getWeekStart())
+                .orElseGet(() -> {
+                    WeeklySchedule s = new WeeklySchedule();
+                    s.setArea(draft.getArea());
+                    s.setWeekStart(draft.getWeekStart());
+                    return scheduleRepository.save(s);
+                });
+        Map<String, ScheduleEntry> current = new HashMap<>();
+        main.getEntries().forEach(e -> current.put(e.getEmployee().getId() + "|" + e.getWorkDate(), e));
+        Set<String> keep = new HashSet<>();
+        for (ScheduleEntry d : draft.getEntries()) {
+            String key = d.getEmployee().getId() + "|" + d.getWorkDate();
+            keep.add(key);
+            ScheduleEntry m = current.get(key);
+            if (m == null) {
+                m = new ScheduleEntry(main, d.getEmployee(), d.getWorkDate(), d.getType(), d.getStore());
+                main.getEntries().add(m);
+            }
+            m.setType(d.getType());
+            m.setStore(d.getType() == DayType.WORK ? d.getStore() : null);
+            m.setAutoAssigned(d.isAutoAssigned());
+            m.setManuallyEdited(d.isManuallyEdited());
+        }
+        main.getEntries().removeIf(m -> !keep.contains(m.getEmployee().getId() + "|" + m.getWorkDate()));
+        // Days the system was holding: given where the published week has them off, dropped where they work.
+        Map<String, DayType> types = new HashMap<>();
+        draft.getEntries().forEach(d -> types.put(d.getEmployee().getId() + "|" + d.getWorkDate(), d.getType()));
+        Instant now = Instant.now();
+        for (LocalDate date : weekDates(draft)) {
+            for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, date, List.of(DayOffStatus.PENDING))) {
+                if (!r.isReserved()) {
+                    continue;
+                }
+                DayType t = types.get(r.getEmployee().getId() + "|" + date);
+                if (t == DayType.OFF || t == DayType.REQUESTED_OFF) {
+                    r.setStatus(DayOffStatus.APPROVED);
+                    r.setReviewNote(r.isRegular() ? "Regular day off, given by the system." : "Given by the system.");
+                    r.setReviewedAt(now);
+                    r.setReviewedBy(DayOffRequest.SYSTEM);
+                } else {
+                    dayOffRepository.delete(r);
+                }
+            }
+        }
+        dayOffRepository.flush();
+        main.setStatus(ScheduleStatus.DRAFT);
+        main.setPublishedAt(null);
+        main.setUpdatedAt(now);
+        scheduleRepository.flush();
+        org.slf4j.LoggerFactory.getLogger(ScheduleService.class).info("{} published the {} draft of {} for the week of {}",
+                accessPolicy.current().email(), draft.getKind(), draft.getArea().getName(), draft.getWeekStart());
+        return publish(main.getId());
     }
 
     // ---------- Approved days off ----------
@@ -1281,7 +1579,9 @@ public class ScheduleService {
                 coverage,
                 gaps,
                 rows,
-                requests);
+                requests,
+                schedule.getKind(),
+                (int) schedule.getEntries().stream().filter(e -> e.getType() == DayType.UNSET).count());
     }
 
     /** Head count per store per day, including any inactive store still on the schedule and unassigned work days. */

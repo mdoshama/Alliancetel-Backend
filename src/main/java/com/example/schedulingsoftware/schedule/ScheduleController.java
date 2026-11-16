@@ -89,6 +89,34 @@ public class ScheduleController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
+    /** Managers and admins: the week's schedules (main and drafts built by hand), for the tabs. */
+    @GetMapping("/drafts")
+    public List<ScheduleDtos.DraftSummary> drafts(@RequestParam Long areaId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return scheduleService.drafts(areaId, weekStart);
+    }
+
+    /** Managers and admins: one draft built by hand (EMPTY or DAYS_OFF); 204 when it hasn't been started. */
+    @GetMapping("/drafts/{kind}")
+    public ResponseEntity<ScheduleResponse> findDraft(@PathVariable ScheduleKind kind, @RequestParam Long areaId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return scheduleService.findDraft(areaId, weekStart, kind)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /** Starts (or starts over) a draft built by hand; the week's main schedule isn't touched. */
+    @PostMapping("/drafts")
+    public ScheduleResponse createDraft(@Valid @RequestBody ScheduleDtos.DraftRequest request) {
+        return scheduleService.createDraft(request.areaId(), request.weekStart(), request.kind());
+    }
+
+    /** The system decides every blank day of a draft built by hand (same rules as Generate). */
+    @PostMapping("/{scheduleId}/fill-blanks")
+    public ScheduleResponse fillBlanks(@PathVariable Long scheduleId) {
+        return scheduleService.fillBlanks(scheduleId);
+    }
+
     /** Whether a week that has passed is locked for you, and the latest request to open it. */
     @GetMapping("/past-week-access")
     public PastWeekLock.WeekStatus pastWeekStatus(@RequestParam Long areaId,

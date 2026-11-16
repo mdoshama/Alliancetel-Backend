@@ -213,6 +213,18 @@ public final class ScheduleDtos {
             List<CoverageGap> coverageGaps,
             List<EmployeeRow> rows,
             /** Pending day-off requests for this week, by day (managers only; empty for employees). */
-            List<WeekRequest> requests) {
+            List<WeekRequest> requests,
+            /** The main schedule, or a draft a manager builds by hand. */
+            ScheduleKind kind,
+            /** Days still blank (drafts built by hand); 0 means everyone's week is decided. */
+            int blankDays) {
+    }
+
+    /** Start (or start over) a draft built by hand: EMPTY or DAYS_OFF. */
+    public record DraftRequest(@NotNull Long areaId, @NotNull LocalDate weekStart, @NotNull ScheduleKind kind) {
+    }
+
+    /** One of the week's schedules, for the tabs: which exist, and how far along each is. */
+    public record DraftSummary(Long id, ScheduleKind kind, ScheduleStatus status, int blankDays, Instant updatedAt) {
     }
 }

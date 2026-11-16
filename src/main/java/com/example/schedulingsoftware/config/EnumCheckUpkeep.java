@@ -41,7 +41,9 @@ public class EnumCheckUpkeep implements ApplicationRunner {
             new EnumColumn("notifications", "channel", NotificationChannel.class),
             new EnumColumn("notifications", "kind", NotificationKind.class),
             new EnumColumn("notifications", "status", NotificationStatus.class),
-            new EnumColumn("employees", "role", com.example.schedulingsoftware.employee.Role.class));
+            new EnumColumn("employees", "role", com.example.schedulingsoftware.employee.Role.class),
+            new EnumColumn("schedule_entries", "type", com.example.schedulingsoftware.schedule.DayType.class),
+            new EnumColumn("weekly_schedules", "kind", com.example.schedulingsoftware.schedule.ScheduleKind.class));
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;
@@ -57,6 +59,8 @@ public class EnumCheckUpkeep implements ApplicationRunner {
             return;
         }
         relaxNotNull();
+        // A week can now have drafts next to its main schedule: the old one-per-week rule gives way to one per kind.
+        jdbc.execute("ALTER TABLE weekly_schedules DROP CONSTRAINT IF EXISTS uk_schedule_area_week");
         for (EnumColumn c : COLUMNS) {
             String name = c.table() + "_" + c.column() + "_check";
             String allowed = Arrays.stream(c.type().getEnumConstants())
