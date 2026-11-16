@@ -712,16 +712,12 @@ public class ScheduleService {
         requireDraft(schedule);
         unlockRevokedDaysOff(schedule);
         Long areaId = schedule.getArea().getId();
+        // The empty draft is the manager's: the days off they gave come first. An approved request (asked for, or
+        // given by the system earlier) is only used when the person still needs a day off; it never adds an extra one.
+        Set<String> approvedOff = new HashSet<>();
         if (schedule.getKind() == ScheduleKind.EMPTY) {
-            // What the manager placed stays, even on an approved day off; a day still blank that someone has approved
-            // off becomes their day off.
-            for (DayOffRequest r : dayOffRepository.findForArea(areaId, DayOffStatus.APPROVED, schedule.getWeekStart(),
-                    schedule.getWeekEnd())) {
-                schedule.getEntries().stream()
-                        .filter(e -> e.getType() == DayType.UNSET && e.getWorkDate().equals(r.getOffDate())
-                                && e.getEmployee().getId().equals(r.getEmployee().getId()))
-                        .forEach(e -> e.setType(DayType.REQUESTED_OFF));
-            }
+            dayOffRepository.findForArea(areaId, DayOffStatus.APPROVED, schedule.getWeekStart(), schedule.getWeekEnd())
+                    .forEach(r -> approvedOff.add(r.getEmployee().getId() + "|" + r.getOffDate()));
         } else {
             ensureApprovedDaysOff(schedule);
         }
@@ -770,6 +766,8 @@ public class ScheduleService {
                 ScheduleEntry pick = week.stream()
                         .filter(e -> e.getType() == DayType.UNSET)
                         .min(Comparator.<ScheduleEntry>comparingInt(e ->
+                                        approvedOff.contains(person.getId() + "|" + e.getWorkDate()) ? 0 : 1)
+                                .thenComparingInt(e ->
                                         coverage.canBeOff(e.getWorkDate(), off.get(e.getWorkDate()), person.getId()) ? 0 : 1)
                                 .thenComparingInt(e -> sameStoreOff(person, off.get(e.getWorkDate()), byEmployee) ? 1 : 0)
                                 .thenComparingInt(e -> person.getRegularDaysOff().contains(e.getWorkDate().getDayOfWeek())
@@ -780,7 +778,9 @@ public class ScheduleService {
                 if (pick == null) {
                     break;
                 }
-                pick.setType(DayType.OFF);
+                // Their approved day off shows as that day off; any other is a plain day off.
+                pick.setType(approvedOff.contains(person.getId() + "|" + pick.getWorkDate()) ? DayType.REQUESTED_OFF
+                        : DayType.OFF);
                 pick.setStore(null);
                 off.get(pick.getWorkDate()).add(person.getId());
             }

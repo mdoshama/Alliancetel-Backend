@@ -143,6 +143,22 @@ class HandBuiltDraftsTest {
     }
 
     @Test
+    void aDayOffTheManagerGaveIsTheOnlyOneEvenWithAnApprovedRequest() {
+        LocalDate wed = week.plusDays(2);
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        dayOffService.create(new CreateDayOffRequest(anna, List.of(wed), null, null));
+        TestUsers.signInAsAdmin();
+        ScheduleResponse draft = scheduleService.createDraft(area, week, ScheduleKind.EMPTY);
+        // The manager gives Anna Monday off instead: Fill the rest must not add her approved Wednesday on top.
+        scheduleService.updateEntry(draft.id(), row(draft, anna).days().getFirst().entryId(), DayType.OFF, null);
+
+        ScheduleResponse filled = scheduleService.fillBlanks(draft.id());
+        assertEquals(DayType.OFF, row(filled, anna).days().getFirst().type());
+        assertEquals(DayType.WORK, row(filled, anna).days().get(2).type(), "Wednesday is a work day");
+        assertEquals(6, row(filled, anna).scheduledWorkDays(), "one day off, the manager's");
+    }
+
+    @Test
     void workingOnAnApprovedDayOffInTheEmptyDraftDeletesItWhenPublished() {
         LocalDate wed = week.plusDays(2);
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
