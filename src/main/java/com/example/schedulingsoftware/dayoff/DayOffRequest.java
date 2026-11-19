@@ -70,6 +70,14 @@ public class DayOffRequest {
     private boolean regular;
 
     /**
+     * A day off the system would give by itself, held back because the person sent an emergency for that week: it
+     * waits for a manager or admin like the emergency (never approved automatically while held).
+     */
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("false")
+    private boolean heldForEmergency;
+
+    /**
      * An emergency sent for a day off a manager took back by changing the schedule. It's the person asking for their
      * day back, so it doesn't use up their one emergency request of the month.
      */
@@ -96,7 +104,7 @@ public class DayOffRequest {
      *                      published with, so only a day still waiting can move there
      */
     public boolean isMovable(boolean weekPublished) {
-        if (!reserved || regular) {
+        if (!reserved || regular || heldForEmergency) {
             return false;
         }
         if (status == DayOffStatus.PENDING) {

@@ -82,4 +82,13 @@ public interface DayOffRequestRepository
             java.util.Collection<DayOffStatus> statuses, LocalDate from);
 
     List<DayOffRequest> findByReservedTrueAndStatusAndOffDateGreaterThanEqual(DayOffStatus status, LocalDate from);
+
+    boolean existsByEmployeeIdAndEmergencyTrueAndStatusAndOffDateBetween(Long employeeId, DayOffStatus status,
+            java.time.LocalDate from, java.time.LocalDate to);
+
+    java.util.List<DayOffRequest> findByEmployeeIdAndOffDateBetween(Long employeeId, java.time.LocalDate from,
+            java.time.LocalDate to);
+
+    java.util.List<DayOffRequest> findByEmergencyTrueAndStatusAndOffDateGreaterThanEqual(DayOffStatus status,
+            java.time.LocalDate from);
 }

@@ -80,6 +80,7 @@ public class ScheduleService {
     private final com.example.schedulingsoftware.dayoff.RequestPortal portal;
     private final FullWeekRepository fullWeeks;
     private final PastWeekLock pastWeekLock;
+    private final com.example.schedulingsoftware.dayoff.EmergencyHold emergencyHold;
 
     /** Generating waits until everyone has sent their day-off request for the week (or been given a day off). */
     @org.springframework.beans.factory.annotation.Value("${alliancetel.scheduling.require-requests-before-generate:true}")
@@ -1291,11 +1292,14 @@ public class ScheduleService {
         Instant now = Instant.now();
         for (LocalDate date : weekDates(draft)) {
             for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, date, List.of(DayOffStatus.PENDING))) {
-                if (!r.isReserved()) {
+                if (!r.isReserved() || r.isHeldForEmergency()) {
                     continue;
                 }
                 DayType t = types.get(r.getEmployee().getId() + "|" + date);
-                if (t == DayType.OFF || t == DayType.REQUESTED_OFF) {
+                if ((t == DayType.OFF || t == DayType.REQUESTED_OFF)
+                        && emergencyHold.emergencyWaiting(r.getEmployee().getId(), date)) {
+                    emergencyHold.hold(r);
+                } else if (t == DayType.OFF || t == DayType.REQUESTED_OFF) {
                     r.setStatus(DayOffStatus.APPROVED);
                     r.setReviewNote(r.isRegular() ? "Regular day off, given by the system." : "Given by the system.");
                     r.setReviewedAt(now);
@@ -1490,7 +1494,12 @@ public class ScheduleService {
         for (int i = 0; i < 7; i++) {
             for (DayOffRequest r : dayOffRepository.findForAreaOnDate(areaId, weekStart.plusDays(i),
                     List.of(DayOffStatus.PENDING))) {
-                if (r.isReserved()) {
+                if (r.isReserved() && !r.isHeldForEmergency()) {
+                    if (emergencyHold.emergencyWaiting(r.getEmployee().getId(), r.getOffDate())) {
+                        // An emergency waits that week: a manager decides this day too.
+                        emergencyHold.hold(r);
+                        continue;
+                    }
                     r.setStatus(DayOffStatus.APPROVED);
                     r.setReviewNote(r.isRegular() ? "Regular day off, given by the system."
                             : "Given by the system (no day was asked for).");

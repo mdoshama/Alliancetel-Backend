@@ -162,18 +162,20 @@ public final class DayOffDtos {
              */
             List<WeekDayOff> weekDaysOff,
             /** Who decided: a manager's or admin's name, "System" when it was automatic, null while waiting. */
-            String reviewedBy) {
+            String reviewedBy,
+            /** A day the system would give, waiting with their emergency for a manager to decide. */
+            boolean heldForEmergency) {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, update, reserved, regular, weekDaysOff, reviewedBy);
+                    decisionChangeReason, decisionChangedAt, update, reserved, regular, weekDaysOff, reviewedBy, heldForEmergency);
         }
 
         public DayOffResponse withWeekDaysOff(List<WeekDayOff> days) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, scheduleUpdate, reserved, regular, days, reviewedBy);
+                    decisionChangeReason, decisionChangedAt, scheduleUpdate, reserved, regular, days, reviewedBy, heldForEmergency);
         }
 
         /**
@@ -223,7 +225,8 @@ public final class DayOffDtos {
                     r.isReserved(),
                     r.isRegular(),
                     null,
-                    reviewerOf(r));
+                    reviewerOf(r),
+                    r.isHeldForEmergency());
         }
     }
 
@@ -249,13 +252,13 @@ public final class DayOffDtos {
      * @param createdAt  when it was asked for (or reserved)
      */
     public record WeekDayOff(Long id, LocalDate date, String kind, DayOffStatus status, String reviewedBy,
-            java.time.Instant reviewedAt, java.time.Instant createdAt) {
+            java.time.Instant reviewedAt, java.time.Instant createdAt, boolean heldForEmergency) {
 
         public static WeekDayOff from(DayOffRequest r) {
             String kind = r.isEmergency() ? "EMERGENCY"
                     : r.isRegular() ? "REGULAR" : r.isReserved() ? "SYSTEM" : "ASKED";
             return new WeekDayOff(r.getId(), r.getOffDate(), kind, r.getStatus(), r.getReviewedBy(),
-                    r.getReviewedAt(), r.getCreatedAt());
+                    r.getReviewedAt(), r.getCreatedAt(), r.isHeldForEmergency());
         }
     }
 }

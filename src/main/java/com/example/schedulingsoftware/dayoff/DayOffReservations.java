@@ -44,14 +44,16 @@ public class DayOffReservations {
     private final boolean enabled;
     private final boolean backgroundJobs;
     private final com.example.schedulingsoftware.live.LiveUpdates liveUpdates;
+    private final EmergencyHold emergencyHold;
 
     public DayOffReservations(DayOffRequestRepository repository, WeekRequests weekRequests,
             AreaRepository areaRepository, WeeklyScheduleRepository scheduleRepository,
             ScheduleService scheduleService, RequestPortal portal,
             @Value("${alliancetel.scheduling.reserve-days-off:true}") boolean enabled,
             @Value("${alliancetel.background-jobs:true}") boolean backgroundJobs,
-            com.example.schedulingsoftware.live.LiveUpdates liveUpdates) {
+            com.example.schedulingsoftware.live.LiveUpdates liveUpdates, EmergencyHold emergencyHold) {
         this.liveUpdates = liveUpdates;
+        this.emergencyHold = emergencyHold;
         this.backgroundJobs = backgroundJobs;
         this.repository = repository;
         this.weekRequests = weekRequests;
@@ -201,7 +203,10 @@ public class DayOffReservations {
             // Only reserved: it waits for a manager or admin like any request (nothing is approved automatically).
             r.setStatus(DayOffStatus.PENDING);
             repository.save(r);
-            if (draftMade) {
+            if (draftMade && emergencyHold.emergencyWaiting(s.employeeId(), date)) {
+                emergencyHold.hold(r);
+                repository.flush();
+            } else if (draftMade) {
                 // The week's draft is already made (e.g. their day gave way to a colleague's request): give the new
                 // day now, the way generating does, so they're never left without one on the schedule.
                 r.setStatus(DayOffStatus.APPROVED);
@@ -317,7 +322,7 @@ public class DayOffReservations {
             }
             List<DayOffRequest> held = repository
                     .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
-                    .stream().filter(r -> r.getStatus() == DayOffStatus.PENDING).toList();
+                    .stream().filter(r -> r.getStatus() == DayOffStatus.PENDING && !r.isHeldForEmergency()).toList();
             if (!held.isEmpty()) {
                 repository.deleteAll(held);
                 repository.flush();
@@ -376,7 +381,7 @@ public class DayOffReservations {
         }
         List<DayOffRequest> held = repository
                 .findByEmployeeIdAndReservedTrueAndOffDateBetweenOrderByOffDateDesc(e.getId(), week, week.plusDays(6))
-                .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED).toList();
+                .stream().filter(r -> r.getStatus() != DayOffStatus.REJECTED && !r.isHeldForEmergency()).toList();
         List<DayOffRequest> canGo = held.stream()
                 .filter(r -> regularToo || !r.isRegular())
                 .sorted(java.util.Comparator.comparing(DayOffRequest::isRegular)

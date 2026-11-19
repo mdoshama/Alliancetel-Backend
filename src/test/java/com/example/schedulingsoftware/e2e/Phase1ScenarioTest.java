@@ -224,9 +224,11 @@ class Phase1ScenarioTest {
         // 10: another emergency for Monday is allowed after the decline (one a month counts only live ones).
         DayOffResponse again = emergency(sec, DayOfWeek.MONDAY, "Doctor, rebooked");
         assertEquals(DayOffStatus.PENDING, again.status(), "REQ 7.10 resubmission after rejection");
-        // ...and a declined request doesn't block a normal day either.
-        assertEquals(DayOffStatus.APPROVED, ask(sec, DayOfWeek.WEDNESDAY).getFirst().status(),
-                "REQ 4 a declined request doesn't block another day");
+        // ...and a declined request doesn't block a normal day either. (With an emergency waiting that week, it
+        // waits for a manager too: the system gives nothing by itself in that week.)
+        DayOffResponse wed = ask(sec, DayOfWeek.WEDNESDAY).getFirst();
+        assertEquals(DayOffStatus.PENDING, wed.status(), "REQ 4 a declined request doesn't block another day");
+        assertTrue(wed.heldForEmergency(), "waits next to the emergency");
 
         // Approving the exception: both off Monday, by a manager's decision only.
         asManager();

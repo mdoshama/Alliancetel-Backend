@@ -279,24 +279,27 @@ class SixDayWorkerRulesTest {
     }
 
     @Test
-    void anEmergencyReplacesTheDayTheSystemPicked() {
+    void anEmergencyHoldsTheDayTheSystemPicked() {
         LocalDate[] d = surrorsWeek();
         TestUsers.signInAs(anna, Role.EMPLOYEE, area);
         var urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(d[1]), "Family", true)).getFirst();
-        assertEquals(List.of(d[1]), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList(),
-                "the system's day is gone: Anna works it");
+        assertEquals(List.of(d[0], d[1]), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList(),
+                "the system's day stays, waiting for a manager next to the emergency");
+        assertTrue(daysOff(anna).getFirst().isHeldForEmergency());
         // The hourly run doesn't hold another day while the emergency waits.
         TestUsers.signInAsAdmin();
         reservations.reserveWeek(area, week);
-        assertEquals(1, daysOff(anna).size());
-        // Turned down: a day is held for her again.
+        assertEquals(2, daysOff(anna).size());
+        // The emergency is turned down; the system's day still waits for a manager, who gives it.
         dayOffService.reject(urgent.id(), "Sorry");
-        assertEquals(1, daysOff(anna).size());
-        assertTrue(daysOff(anna).getFirst().isReserved());
+        assertEquals(List.of(d[0]), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList());
+        assertEquals(DayOffStatus.PENDING, daysOff(anna).getFirst().getStatus());
+        dayOffService.approve(daysOff(anna).getFirst().getId(), null);
+        assertEquals(DayOffStatus.APPROVED, daysOff(anna).getFirst().getStatus());
     }
 
     @Test
-    void onAPublishedWeekTheSystemDayGoesWhenTheEmergencyIsApproved() {
+    void onAPublishedWeekTheManagerDecidesBothDays() {
         LocalDate[] d = surrorsWeek();
         TestUsers.signInAsAdmin();
         scheduleService.publish(scheduleService.generate(area, week, true).id());
@@ -305,6 +308,9 @@ class SixDayWorkerRulesTest {
         assertEquals(2, daysOff(anna).size(), "published: the system's day stays until a decision");
         TestUsers.signInAsAdmin();
         dayOffService.approve(urgent.id(), "OK");
+        // The system's day waits for its own decision: rejected, Anna works it.
+        DayOffRequest held = daysOff(anna).stream().filter(DayOffRequest::isHeldForEmergency).findFirst().orElseThrow();
+        dayOffService.reject(held.getId(), null);
         assertEquals(List.of(d[1]), daysOff(anna).stream().map(DayOffRequest::getOffDate).toList());
         var row = scheduleService.find(area, week).orElseThrow().rows().stream()
                 .filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
@@ -387,7 +393,7 @@ class SixDayWorkerRulesTest {
 
         TestUsers.signInAsAdmin();
         var seen = dayOffService.page(area, null, DayOffStatus.PENDING, null, null, null, null, null, true, 0, 50)
-                .content().stream().filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow();
+                .content().stream().filter(r -> r.employeeId().equals(anna) && r.emergency()).findFirst().orElseThrow();
         assertEquals(1, seen.weekDaysOff().size());
         assertEquals(week, seen.weekDaysOff().getFirst().date());
         assertEquals("REGULAR", seen.weekDaysOff().getFirst().kind());

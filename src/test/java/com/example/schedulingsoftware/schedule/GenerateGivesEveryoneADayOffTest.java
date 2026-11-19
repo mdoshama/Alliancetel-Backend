@@ -1,6 +1,7 @@
 package com.example.schedulingsoftware.schedule;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
@@ -142,16 +143,16 @@ class GenerateGivesEveryoneADayOffTest {
         Long ben = employee("GN-2", "Ben", north, 6);
         dayOffService.create(new CreateDayOffRequest(ben, List.of(monday.plusDays(4)), "Family", true, null));
         dayOffService.create(new CreateDayOffRequest(ben, List.of(monday.plusDays(1)), null, null));
-        // Managers only list emergencies: the other request was given by the system.
+        // With an emergency waiting that week, his other day isn't given by the system: it waits next to it.
         var emergencies = dayOffService.page(area, null, null, monday, null, null, null, null, true, 0, 25);
-        assertEquals(1, emergencies.totalElements());
-        assertTrue(emergencies.content().getFirst().emergency());
+        assertEquals(2, emergencies.totalElements());
+        assertTrue(emergencies.content().stream().anyMatch(r -> r.emergency()));
+        assertTrue(emergencies.content().stream().anyMatch(r -> r.heldForEmergency()));
 
         ScheduleResponse s = controller.generate(new GenerateScheduleRequest(area, monday));
 
         assertEquals(DayType.WORK, row(s, ben).days().get(4).type(), "the emergency waits for a manager");
-        assertEquals(DayType.REQUESTED_OFF, row(s, ben).days().get(1).type(), "his own pick is his day off");
-        assertEquals(1, offDays(row(s, ben)));
+        assertNotEquals(DayType.REQUESTED_OFF, row(s, ben).days().get(1).type(), "his other day waits too");
     }
 
     private static long offDays(EmployeeRow row) {

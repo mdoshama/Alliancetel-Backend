@@ -62,6 +62,7 @@ public class DayOffService {
     private final boolean oneEmergencyPerMonth;
     private final java.time.ZoneId zone;
     private final DayOffReservations reservations;
+    private final EmergencyHold emergencyHold;
     private final RequestPortal portal;
     private final com.example.schedulingsoftware.area.AreaRepository areaRepository;
 
@@ -76,7 +77,9 @@ public class DayOffService {
             @Value("${alliancetel.scheduling.zone:America/Los_Angeles}") String zone,
             DayOffReservations reservations,
             RequestPortal portal,
-            com.example.schedulingsoftware.area.AreaRepository areaRepository) {
+            com.example.schedulingsoftware.area.AreaRepository areaRepository,
+            EmergencyHold emergencyHold) {
+        this.emergencyHold = emergencyHold;
         this.areaRepository = areaRepository;
         this.reservations = reservations;
         this.portal = portal;
@@ -196,7 +199,10 @@ public class DayOffService {
             if (regular != null) {
                 predicates.add(cb.equal(root.get("regular"), regular));
             }
-            if (emergency != null) {
+            if (Boolean.TRUE.equals(emergency)) {
+                // Emergencies, with the days held next to them (they wait for a manager too).
+                predicates.add(cb.or(cb.isTrue(root.get("emergency")), cb.isTrue(root.get("heldForEmergency"))));
+            } else if (emergency != null) {
                 predicates.add(cb.equal(root.get("emergency"), emergency));
             }
             if (from != null) {
@@ -372,10 +378,10 @@ public class DayOffService {
         if (emergency) {
             // Emergencies are the only requests a manager or admin decides on (they can break the coverage rules).
             saved.forEach(r -> created.add(DayOffResponse.from(r)));
-            // A day the system picked for them that week goes: they work it (their regular day stays). Published
-            // weeks keep it until the emergency is approved; if it's turned down, a day is held for them again.
+            // Their week is on hold: the days off the system gave them (or holds for them) that week wait for a
+            // manager too, next to the emergency, so each day is approved or rejected by a person.
             new TreeSet<>(saved.stream().map(r -> weekStart(r.getOffDate())).toList())
-                    .forEach(monday -> reservations.trim(employee, monday, false));
+                    .forEach(monday -> emergencyHold.holdWeek(employee.getId(), monday));
             return created;
         }
         // Everything else passed the checks above (store covered, one person per store, primaries and floaters
@@ -1073,6 +1079,12 @@ public class DayOffService {
 
     /** Marks the request approved by the system (no manager involved) and applies it like any approval. */
     private DayOffResponse grantAutomatically(DayOffRequest r, String note) {
+        if (!r.isEmergency() && emergencyHold.emergencyWaiting(r.getEmployee().getId(), r.getOffDate())) {
+            // An emergency is waiting that week: nothing is given by the system, a manager decides this day too.
+            emergencyHold.hold(r);
+            repository.flush();
+            return DayOffResponse.from(r);
+        }
         r.setStatus(DayOffStatus.APPROVED);
         r.setReviewNote(note);
         r.setReviewedBy(DayOffRequest.SYSTEM);
@@ -1174,8 +1186,18 @@ public class DayOffService {
 
     @Transactional
     public DayOffResponse reject(Long id, String note) {
+        boolean held = get(id).isHeldForEmergency();
         DayOffResponse rejected = review(id, DayOffStatus.REJECTED, note);
         DayOffRequest r = get(id);
+        if (held) {
+            // A day the system had given, held with an emergency and now rejected: they work it (on a schedule
+            // already made too). The manager decided the week, so no other day is picked for them.
+            scheduleService.revokeApprovedDayOff(r.getEmployee(), r.getOffDate(), true);
+            if (!r.isReserved() || r.isRegular()) {
+                notifier.dayOffDecided(r, false, r.getReviewNote());
+            }
+            return rejected;
+        }
         notifier.dayOffDecided(r, false, r.getReviewNote());
         reservations.refill(r.getEmployee(), r.getOffDate());
         return rejected;
@@ -1341,6 +1363,7 @@ public class DayOffService {
             throw new BusinessRuleException("This request was already " + r.getStatus().name().toLowerCase() + ".");
         }
         r.setStatus(newStatus);
+        r.setHeldForEmergency(false);
         r.setReviewNote(InputRules.clean(note));
         r.setReviewedBy(accessPolicy.current().fullName());
         r.setReviewedAt(Instant.now());

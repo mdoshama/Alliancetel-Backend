@@ -60,6 +60,7 @@ class FourTabsTest {
     @Autowired DayOffReservations reservations;
     @Autowired ScheduleService scheduleService;
     @Autowired RequestPortal portal;
+    @Autowired com.example.schedulingsoftware.dayoff.DayOffRequestRepository dayOffRepository;
 
     LocalDate week;
     Long area;
@@ -257,7 +258,9 @@ class FourTabsTest {
 
         ScheduleResponse d = scheduleService.createDraft(area, week, ScheduleKind.DAYS_OFF);
         assertEquals(DayType.REQUESTED_OFF, cell(d, abe, day(DayOfWeek.THURSDAY)).type(), "approved request shows");
-        assertEquals(DayType.REQUESTED_OFF, cell(d, bob, day(DayOfWeek.FRIDAY)).type());
+        // Bob also sent an emergency that week, so his Friday waits for a manager (not given by the system).
+        assertNotEquals(DayType.REQUESTED_OFF, cell(d, bob, day(DayOfWeek.FRIDAY)).type());
+        assertTrue(record(bob, day(DayOfWeek.FRIDAY)).isHeldForEmergency());
         assertTrue(cell(d, ann, day(DayOfWeek.MONDAY)).type() != DayType.UNSET
                 && cell(d, ann, day(DayOfWeek.MONDAY)).type() != DayType.WORK, "regular day off shows");
         assertNotEquals(DayType.REQUESTED_OFF, cell(d, bob, day(DayOfWeek.SUNDAY)).type(), "pending emergency isn't approved");
@@ -534,5 +537,49 @@ class FourTabsTest {
         storeService.reopen(area, fri, null);
         storeService.reopen(area, thu, null);
         assertTrue(storeService.closures(area).isEmpty());
+    }
+
+    // ---------- An emergency puts the week on hold ----------
+
+    private com.example.schedulingsoftware.dayoff.DayOffRequest record(Long employee, LocalDate date) {
+        return dayOffRepository.findByEmployeeIdAndOffDate(employee, date).orElseThrow();
+    }
+
+    @Test
+    void anEmergencyHoldsTheDaysTheSystemGaveThatWeek() {
+        asManager();
+        LocalDate mon = day(DayOfWeek.MONDAY);
+        LocalDate wed = day(DayOfWeek.WEDNESDAY);
+        ScheduleResponse main = scheduleService.generate(area, week, true);
+        assertEquals(DayOffStatus.APPROVED, record(ann, mon).getStatus(), "regular Monday given by the system");
+
+        // Ann sends an emergency for Wednesday: her Monday waits for a manager too.
+        TestUsers.signInAs(ann, Role.EMPLOYEE, area);
+        DayOffResponse emergency = dayOffService.create(
+                new CreateDayOffRequest(ann, List.of(wed), "Exam", true, false)).getFirst();
+        asManager();
+        var monday = record(ann, mon);
+        assertEquals(DayOffStatus.PENDING, monday.getStatus());
+        assertTrue(monday.isHeldForEmergency());
+        var pending = dayOffService.page(area, null, DayOffStatus.PENDING, null, null, null, null, null, true, 0, 50)
+                .content();
+        assertTrue(pending.stream().anyMatch(r -> r.id().equals(monday.getId()) && r.heldForEmergency()),
+                "the held day is in Pending with the emergency");
+
+        // Regenerating doesn't give it either.
+        scheduleService.reset(main.id());
+        main = scheduleService.generate(area, week, true);
+        assertEquals(DayOffStatus.PENDING, record(ann, mon).getStatus(), "still waiting for a manager");
+
+        // The emergency is approved; Monday still waits, then the manager rejects it: Ann works Monday.
+        dayOffService.approve(emergency.id(), null);
+        assertEquals(DayOffStatus.PENDING, record(ann, mon).getStatus());
+        assertTrue(dayOffService.page(area, null, DayOffStatus.PENDING, null, null, null, null, null, true, 0, 50)
+                .content().stream().anyMatch(r -> r.id().equals(monday.getId())), "still listed after the emergency");
+        dayOffService.reject(monday.getId(), null);
+        assertEquals(DayOffStatus.REJECTED, record(ann, mon).getStatus());
+        assertFalse(record(ann, mon).isHeldForEmergency());
+        assertEquals(DayType.WORK, cell(tab(ScheduleKind.MAIN), ann, mon).type(), "she works Monday");
+        assertEquals(DayType.REQUESTED_OFF, cell(tab(ScheduleKind.MAIN), ann, wed).type(), "her emergency day is off");
     }
 }
