@@ -76,6 +76,9 @@ public class SecurityConfig {
                         // Areas and employees are maintained by admins; managers can look at their own team.
                         .requestMatchers(HttpMethod.GET, "/api/areas/**").authenticated()
                         .requestMatchers("/api/areas/**").hasRole(ADMIN)
+                        // Holiday closures: managers close their own area's stores on a date (checked in StoreService).
+                        .requestMatchers("/api/stores/closures", "/api/stores/closures/**")
+                        .hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)
                         .requestMatchers(HttpMethod.GET, "/api/stores/**").authenticated()
                         .requestMatchers("/api/stores/**").hasRole(ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/employees/**").hasAnyRole(ADMIN, MANAGER, MARKET_MANAGER)

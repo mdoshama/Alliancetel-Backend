@@ -60,7 +60,16 @@ public class LiveUpdates {
      * @param actorAreaId the area of whoever made the change (null for admins, whose changes reach everyone)
      */
     public void publish(String topic, CurrentUser actor, String originClientId) {
-        Long actorAreaId = actor == null || actor.isAdmin() ? null : actor.areaId();
+        publish(topic, actor, null, originClientId);
+    }
+
+    /**
+     * @param workingAreaId the area the change was made in when it isn't the actor's own (a Market Manager working in
+     *                      one of their other areas); null = the actor's area
+     */
+    public void publish(String topic, CurrentUser actor, Long workingAreaId, String originClientId) {
+        Long actorAreaId = actor == null || actor.isAdmin() ? null
+                : workingAreaId != null && actor.manages(workingAreaId) ? workingAreaId : actor.areaId();
         String byName = actor == null ? null : firstName(actor.fullName());
         Instant now = Instant.now();
         for (Client c : clients) {

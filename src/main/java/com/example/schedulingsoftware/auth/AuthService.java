@@ -152,7 +152,7 @@ public class AuthService {
     public Me setWhatsapp(boolean optIn) {
         Employee e = load(accessPolicy.current().id());
         if (optIn && e.getPhone() == null) {
-            throw new BusinessRuleException("There's no phone number on file for you. Ask your manager to add it.");
+            throw new BusinessRuleException("No phone number on file. Ask your manager.");
         }
         e.setWhatsappOptIn(optIn);
         return Me.from(e);
@@ -163,7 +163,7 @@ public class AuthService {
     public Me setSms(boolean optIn) {
         Employee e = load(accessPolicy.current().id());
         if (optIn && e.getPhone() == null) {
-            throw new BusinessRuleException("There's no phone number on file for you. Ask your manager to add it.");
+            throw new BusinessRuleException("No phone number on file. Ask your manager.");
         }
         e.setSmsOptIn(optIn);
         if (optIn) {

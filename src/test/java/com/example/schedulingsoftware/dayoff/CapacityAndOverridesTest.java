@@ -173,7 +173,7 @@ class CapacityAndOverridesTest {
         LocalDate other = week.datesUntil(week.plusDays(7))
                 .filter(d -> d.isAfter(portal.today()) && !d.equals(held.getOffDate())).findFirst().orElseThrow();
         // Even on a day the rules would refuse (Nia and Ned off too), the override gives it.
-        dayOffService.create(new CreateDayOffRequest(n1, List.of(other), null, true, true));
+        dayOffService.create(new CreateDayOffRequest(n1, List.of(other), "Urgent", true, true));
         var given = dayOffService.create(new CreateDayOffRequest(f1, List.of(other), "Agreed", null, true));
         assertEquals(DayOffStatus.APPROVED, given.getFirst().status());
         List<DayOffRequest> fins = requests.findAll().stream().filter(r -> r.getEmployee().getId().equals(f1))

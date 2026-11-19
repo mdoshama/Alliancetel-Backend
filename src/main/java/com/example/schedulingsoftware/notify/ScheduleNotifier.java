@@ -121,6 +121,24 @@ public class ScheduleNotifier {
                         + ".\n\n" + extra);
     }
 
+    /**
+     * A manager changed the schedule so the person now works a day they had off (asked for, regular, or given by the
+     * system). Tells them, with their new day off when the manager gave one, and that they can ask for it again as an
+     * emergency.
+     */
+    public void dayOffTakenBack(DayOffRequest request, LocalDate newDayOff) {
+        Employee e = request.getEmployee();
+        String when = day(request.getOffDate(), true);
+        String result = "changed by your manager";
+        // Most important first: a text message is cut to one part.
+        String extra = "It's a work day now. Still need it? Send an emergency request in the app."
+                + (newDayOff == null ? "" : " New day off: " + day(newDayOff, false) + ".");
+        queue(e, NotificationKind.DAY_OFF_DECISION, List.of(e.getFirstName(), when, result, extra),
+                "Your day off on " + when + " was changed",
+                "Hi " + e.getFirstName() + ",\n\nYour manager changed the schedule: your day off on " + when
+                        + " is now a work day.\n\n" + extra);
+    }
+
     /** The opt-in confirmation text, right after someone agrees to texts (only when texting is connected). */
     @org.springframework.transaction.annotation.Transactional
     public void smsOptInConfirmation(Long employeeId) {
@@ -369,7 +387,7 @@ public class ScheduleNotifier {
         if (store == null) {
             return "Work";
         }
-        StoreDayHours h = store.hoursOn(e.getWorkDate().getDayOfWeek());
+        StoreDayHours h = store.hoursOn(e.getWorkDate());
         if (h.isClosed() || h.getOpensAt() == null) {
             return store.getName();
         }

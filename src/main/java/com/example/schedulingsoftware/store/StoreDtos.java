@@ -86,4 +86,18 @@ public final class StoreDtos {
                     s.getMaxFloatersPerDay());
         }
     }
+
+    /** Close stores on a date (a holiday). No store ids = every active store in the area. */
+    public record ClosureRequest(@jakarta.validation.constraints.NotNull Long areaId,
+            @jakarta.validation.constraints.NotNull java.time.LocalDate date,
+            @jakarta.validation.constraints.Size(max = 60) String label, List<Long> storeIds) {
+    }
+
+    /** One closed date in an area: which stores, and what for. */
+    public record ClosureResponse(java.time.LocalDate date, String label, boolean wholeArea,
+            List<ClosedStore> stores) {
+    }
+
+    public record ClosedStore(Long id, String name, String color) {
+    }
 }

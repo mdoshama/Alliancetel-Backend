@@ -33,7 +33,13 @@ public class LiveChangeInterceptor implements HandlerInterceptor {
             return;
         }
         CurrentUser actor = CurrentUser.find().orElse(null);
-        liveUpdates.publish(topic, actor, cleanClientId(request.getHeader(CLIENT_HEADER)));
+        // A Market Manager works in one of their areas at a time (the app sends it): that area's screens hear it.
+        Long workingArea = actor != null && actor.isMarketManager() ? areaHeader(request.getHeader("X-Area-Id")) : null;
+        liveUpdates.publish(topic, actor, workingArea, cleanClientId(request.getHeader(CLIENT_HEADER)));
+    }
+
+    static Long areaHeader(String value) {
+        return value != null && value.matches("\\d{1,18}") ? Long.valueOf(value) : null;
     }
 
     static boolean changes(String method) {

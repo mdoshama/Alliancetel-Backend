@@ -174,7 +174,7 @@ class WeeklyRequestRulesTest {
         // She works 6 days, so one normal day off is all: a second one is refused.
         BusinessRuleException second = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
                 new CreateDayOffRequest(anna, List.of(open.plusDays(3)), null, null)));
-        assertTrue(second.getMessage().contains("only 1 day off"), second.getMessage());
+        assertTrue(second.getMessage().contains("1 day off a week"), second.getMessage());
 
         // Now the week is full for her: an emergency goes to a manager.
         var urgent = dayOffService.create(new CreateDayOffRequest(anna, List.of(open.plusDays(3)), "Sick", true)).getFirst();

@@ -120,7 +120,7 @@ class ManagerOwnsTheMadeWeekTest {
         assertEquals(DayType.OFF, row(after, anna).days().get(next).type());
         assertEquals(DayType.WORK, row(after, anna).days().get(old).type(), "not off on the old day too");
         assertEquals(6, row(after, anna).scheduledWorkDays(), "still one day off");
-        assertEquals(0, liveRequests(anna), "the old day-off request is gone");
+        assertEquals(1, liveRequests(anna), "only the new day is hers: the old one is gone");
     }
 
     @Test
@@ -134,7 +134,7 @@ class ManagerOwnsTheMadeWeekTest {
         assertEquals(DayType.WORK, row(after, ben).days().get(old).type());
         assertEquals(DayType.OFF, row(after, ben).days().get(next).type());
         assertEquals(6, row(after, ben).scheduledWorkDays());
-        assertEquals(0, liveRequests(ben));
+        assertEquals(1, liveRequests(ben), "only the new day is his");
     }
 
     @Test

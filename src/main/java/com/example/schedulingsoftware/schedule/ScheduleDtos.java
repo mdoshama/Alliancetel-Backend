@@ -93,7 +93,9 @@ public final class ScheduleDtos {
              * RESERVED (the system gave it), EMERGENCY (approved emergency) or MANAGER (given
              * by a manager); null otherwise.
              */
-            String offSource) {
+            String offSource,
+            /** "Schedule by System": what the system had here, when a manager or admin changed it; null otherwise. */
+            String systemLabel) {
     }
 
     /**
@@ -224,7 +226,16 @@ public final class ScheduleDtos {
     public record DraftRequest(@NotNull Long areaId, @NotNull LocalDate weekStart, @NotNull ScheduleKind kind) {
     }
 
+    /** Day-off draft: fill the blank days of every primary (or every secondary) at their home store. */
+    public record FillRoleRequest(@NotNull com.example.schedulingsoftware.employee.StoreRole role) {
+    }
+
+    /** "Schedule by System" for an area and week. */
+    public record SystemRequest(@NotNull Long areaId, @NotNull LocalDate weekStart) {
+    }
+
     /** One of the week's schedules, for the tabs: which exist, and how far along each is. */
-    public record DraftSummary(Long id, ScheduleKind kind, ScheduleStatus status, int blankDays, Instant updatedAt) {
+    public record DraftSummary(Long id, ScheduleKind kind, ScheduleStatus status, int blankDays, Instant updatedAt,
+                               boolean saved) {
     }
 }

@@ -149,7 +149,7 @@ public class EmployeeService {
     private static String signInDetails(EmployeeRequest request, String email) {
         String phone = PhoneNumbers.normalize(request.phone());
         if (email == null && phone == null) {
-            throw new BusinessRuleException("Add an email or a phone number: they sign in with one of them.");
+            throw new BusinessRuleException("Add an email or a phone number.");
         }
         return phone;
     }
@@ -170,8 +170,7 @@ public class EmployeeService {
             throw new BusinessRuleException("Email '" + email + "' is already in use.");
         }
         if (phone != null && employeeRepository.existsByPhone(phone)) {
-            throw new BusinessRuleException("Phone " + request.phone().trim() + " is already used by someone else. "
-                    + "People sign in with it, so each phone number can belong to one person only.");
+            throw new BusinessRuleException("That phone number is already used.");
         }
         Employee employee = new Employee();
         apply(employee, request, code, email);
@@ -202,8 +201,7 @@ public class EmployeeService {
         }
         // Checked only when the number changes, so older records that share one can still be edited.
         if (phone != null && !phone.equals(employee.getPhone()) && employeeRepository.existsByPhoneAndIdNot(phone, id)) {
-            throw new BusinessRuleException("Phone " + request.phone().trim() + " is already used by someone else. "
-                    + "People sign in with it, so each phone number can belong to one person only.");
+            throw new BusinessRuleException("That phone number is already used.");
         }
         boolean textsBefore = employee.isSmsOptIn();
         apply(employee, request, code, email);
@@ -233,8 +231,7 @@ public class EmployeeService {
         }
         accessPolicy.requireManagerOf(employee.getArea() == null ? null : employee.getArea().getId());
         if (request.role() != Role.EMPLOYEE) {
-            throw new BusinessRuleException("Only an admin can change someone's role. You can switch them between "
-                    + "employee and trainee.");
+            throw new BusinessRuleException("Only an admin can change roles.");
         }
         accessPolicy.requireManagerOf(request.areaId());
         if (request.active() != null && request.active() != employee.isActive()) {
@@ -301,8 +298,7 @@ public class EmployeeService {
         }
         Employee employee = getEmployee(id);
         if (employee.getRole() != Role.MARKET_MANAGER) {
-            throw new BusinessRuleException(employee.getFullName() + " isn't a Market Manager, so there are no areas "
-                    + "to assign. Change their role first.");
+            throw new BusinessRuleException(employee.getFullName() + " isn't a Market Manager.");
         }
         java.util.Set<com.example.schedulingsoftware.area.Area> areas = new java.util.HashSet<>();
         for (Long areaId : new java.util.LinkedHashSet<>(areaIds)) {
@@ -401,8 +397,7 @@ public class EmployeeService {
     /** An account its owner deleted stays deleted: it can't be reactivated or given a new password. */
     private static void requireNotDeleted(Employee employee) {
         if (employee.getDeletedAt() != null) {
-            throw new BusinessRuleException("This account was deleted by its owner and can't be changed. "
-                    + "Add the person again as a new employee if they come back.");
+            throw new BusinessRuleException("This account was deleted. Add them again if needed.");
         }
     }
 
@@ -466,8 +461,7 @@ public class EmployeeService {
             if (request.smsOptIn()) {
                 // Texting needs the person's agreement: an admin records that they gave it.
                 if (!by.isAdmin()) {
-                    throw new BusinessRuleException("Only an admin can turn on text messages for someone. They can also "
-                            + "turn them on themselves in their account menu.");
+                    throw new BusinessRuleException("Only an admin can turn on texts.");
                 }
                 if (phone == null) {
                     throw new BusinessRuleException("Add a mobile number before turning on text messages.");
@@ -570,8 +564,7 @@ public class EmployeeService {
         Employee other = otherPrimary(employee);
         if (other != null) {
             throw new BusinessRuleException(other.getFullName() + " is already the primary at "
-                    + employee.getHomeStore().getName() + ". A store has only one primary: make "
-                    + other.getFirstName() + " a secondary first.");
+                    + employee.getHomeStore().getName() + ".");
         }
     }
 }

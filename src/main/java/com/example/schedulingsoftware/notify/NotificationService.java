@@ -149,8 +149,7 @@ public class NotificationService {
             sent.add("Text");
         }
         if (sent.isEmpty()) {
-            throw new BusinessRuleException("There's no way to reach " + e.getFirstName() + " by message right now ("
-                    + String.join("; ", notSent) + "). Try calling instead.");
+            throw new BusinessRuleException("Can't message " + e.getFirstName() + " right now. Try calling.");
         }
         Area area = e.getArea();
         notifier.announce(area, List.of(e), user.fullName(), InputRules.clean(message));

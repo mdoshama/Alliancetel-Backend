@@ -19,6 +19,9 @@ public interface DayOffRequestRepository
     @Query("update DayOffRequest r set r.reason = null where r.employee.id = :employeeId")
     int clearReasonsFor(@Param("employeeId") Long employeeId);
 
+    boolean existsByEmployeeIdAndEmergencyTrueAndAfterTakenBackFalseAndOffDateBetweenAndStatusIn(Long employeeId,
+            LocalDate from, LocalDate to, java.util.Collection<DayOffStatus> statuses);
+
     boolean existsByEmployeeIdAndEmergencyTrueAndOffDateBetweenAndStatusIn(Long employeeId, LocalDate from,
             LocalDate to, java.util.Collection<DayOffStatus> statuses);
 

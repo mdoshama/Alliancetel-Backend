@@ -137,7 +137,7 @@ public class TimeClockService {
         if (store == null) {
             return null;
         }
-        StoreDayHours h = store.hoursOn(date.getDayOfWeek());
+        StoreDayHours h = store.hoursOn(date);
         return h == null || h.isClosed() ? null : h.getOpensAt();
     }
 

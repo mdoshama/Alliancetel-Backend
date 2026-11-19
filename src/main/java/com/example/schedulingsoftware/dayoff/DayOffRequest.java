@@ -69,6 +69,14 @@ public class DayOffRequest {
     @org.hibernate.annotations.ColumnDefault("false")
     private boolean regular;
 
+    /**
+     * An emergency sent for a day off a manager took back by changing the schedule. It's the person asking for their
+     * day back, so it doesn't use up their one emergency request of the month.
+     */
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("false")
+    private boolean afterTakenBack;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DayOffStatus status = DayOffStatus.PENDING;

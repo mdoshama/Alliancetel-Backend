@@ -1,5 +1,7 @@
 package com.example.schedulingsoftware.schedule;
 
+import com.example.schedulingsoftware.dayoff.DayOffStatus;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -203,8 +205,9 @@ class HandBuiltDraftsTest {
 
         ScheduleResponse published = scheduleService.publish(scheduleService.fillBlanks(draft.id()).id());
         assertEquals(DayType.WORK, row(published, anna).days().get(2).type(), "the manager's decision is published");
-        assertTrue(dayOffService.page(area, anna, null, wed, wed, null, 0, 10).content().isEmpty(),
-                "she works it: that day off is deleted");
+        var left = dayOffService.page(area, anna, null, wed, wed, null, 0, 10).content();
+        assertTrue(left.stream().allMatch(r -> r.status() == DayOffStatus.REJECTED && r.decisionChangeReason() != null),
+                "she works it: that day off is taken back (kept on record as changed, and she's told)");
         assertTrue(request != null);
     }
 

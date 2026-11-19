@@ -113,7 +113,7 @@ class MoveDayOffTest {
         assertEquals(1, days.size(), "still one day off, now Wednesday");
         assertEquals(week.plusDays(2), days.getFirst().getOffDate());
         assertTrue(!days.getFirst().isEmergency());
-        assertEquals("family", days.getFirst().getReason());
+        assertEquals(null, days.getFirst().getReason(), "a normal day off keeps no reason");
     }
 
     @Test

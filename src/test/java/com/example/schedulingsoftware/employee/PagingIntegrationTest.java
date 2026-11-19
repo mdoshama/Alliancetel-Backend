@@ -126,7 +126,7 @@ class PagingIntegrationTest {
         LocalDate monday = DayOffService.weekStart(LocalDate.now()).plusWeeks(2);
         for (int i = 0; i < 6; i++) {
             Long floater = people.get(20 + (i % 3));
-            dayOffService.create(new CreateDayOffRequest(floater, List.of(monday.plusDays(i)), null, true));
+            dayOffService.create(new CreateDayOffRequest(floater, List.of(monday.plusDays(i)), "Urgent", true));
         }
         PageResponse<DayOffResponse> first = dayOffService.page(area, null, null, monday, null, null, 0, 4);
         assertEquals(6, first.totalElements());

@@ -41,6 +41,7 @@ import com.example.schedulingsoftware.support.TestUsers;
 @Transactional
 class StoreRotationIntegrationTest {
 
+    @Autowired com.example.schedulingsoftware.dayoff.DayOffRequestRepository dayOffRepository;
     @Autowired
     AreaService areaService;
     @Autowired
@@ -211,7 +212,7 @@ class StoreRotationIntegrationTest {
     }
 
     @Test
-    void swapNeverPutsSomeoneWhoIsOffToWork() {
+    void swapPutsTheOffPersonToWorkWhenTheManagerWantsIt() {
         ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ana, 2);
         DayCell anaOff = row(s, ana).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
         int day = row(s, ana).days().indexOf(anaOff);
@@ -219,26 +220,28 @@ class StoreRotationIntegrationTest {
         if (benSameDay.type() != DayType.WORK) {
             return; // Both off the same day in this layout; nothing to swap.
         }
-        assertThrows(BusinessRuleException.class,
-                () -> scheduleService.swap(s.id(), anaOff.entryId(), benSameDay.entryId()));
-        assertThrows(BusinessRuleException.class,
-                () -> scheduleService.exchange(s.id(), benSameDay.entryId(), anaOff.entryId(), null));
+        // The manager decides: the swap goes through, Ana works and Ben is off that day.
+        scheduleService.swap(s.id(), anaOff.entryId(), benSameDay.entryId());
         ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
-        assertEquals(DayType.OFF, row(after, ana).days().get(day).type(), "Ana stays off");
-        assertEquals(DayType.WORK, row(after, ben).days().get(day).type());
+        assertEquals(DayType.WORK, row(after, ana).days().get(day).type(), "Ana works");
+        assertEquals(DayType.OFF, row(after, ben).days().get(day).type(), "Ben is off");
     }
 
     @Test
-    void cannotSwapAcrossDaysOrAwayAnApprovedDayOff() {
+    void cannotSwapAcrossDaysButCanSwapAwayADayOff() {
         dayOffService.create(new CreateDayOffRequest(ana, List.of(monday), null, null)); // given right away
         ScheduleResponse s = scheduleService.generate(area, monday);
 
         DayCell anaMonday = row(s, ana).days().get(0);
         DayCell benMonday = row(s, ben).days().get(0);
         DayCell benTuesday = row(s, ben).days().get(1);
-        assertThrows(BusinessRuleException.class, () -> scheduleService.swap(s.id(), anaMonday.entryId(), benMonday.entryId()));
         assertThrows(BusinessRuleException.class,
                 () -> scheduleService.swap(s.id(), row(s, ana).days().get(2).entryId(), benTuesday.entryId()));
+        // The manager can swap an approved day off away: Ana works Monday and her day off is taken back.
+        ScheduleResponse after = scheduleService.swap(s.id(), anaMonday.entryId(), benMonday.entryId());
+        assertEquals(DayType.WORK, row(after, ana).days().get(0).type());
+        assertTrue(dayOffRepository.findByEmployeeIdAndOffDate(ana, monday).map(ScheduleService::wasTakenBack).orElse(false),
+                "kept on record as taken back");
     }
 
     @Test
@@ -320,12 +323,7 @@ class StoreRotationIntegrationTest {
     void anyTwoDaysCanTradePlaces() {
         ScheduleResponse s = dayOff(scheduleService.generate(area, monday), ben, 3);
         // Ana's first work day and Ben's day off on a different date.
-        // Between two people, a work day can't land on someone's day off.
         DayCell benOff = row(s, ben).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow();
-        DayCell anaWork = row(s, ana).days().stream()
-                .filter(c -> c.type() == DayType.WORK && !c.date().equals(benOff.date())).findFirst().orElseThrow();
-        assertThrows(BusinessRuleException.class,
-                () -> scheduleService.exchange(s.id(), anaWork.entryId(), benOff.entryId(), null));
 
         // Ben can still move his own day off to another day of his week.
         DayCell benWork = row(s, ben).days().stream()
@@ -368,8 +366,10 @@ class StoreRotationIntegrationTest {
         ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
         DayCell anaThuOff = row(after, ana).days().get(3);
         DayCell benWork = row(after, ben).days().stream().filter(c -> c.type() == DayType.WORK).findFirst().orElseThrow();
-        assertThrows(BusinessRuleException.class, () -> scheduleService.exchange(s.id(), benWork.entryId(), anaThuOff.entryId(), null),
-                "approved day off can't be moved");
+        // The manager can move it anyway: Ana works Thursday (her day off is taken back) and Ben gets her day off.
+        scheduleService.exchange(s.id(), benWork.entryId(), anaThuOff.entryId(), null);
+        ScheduleResponse moved = scheduleService.find(area, monday).orElseThrow();
+        assertEquals(DayType.WORK, row(moved, ana).days().get(3).type());
     }
 
     @Test

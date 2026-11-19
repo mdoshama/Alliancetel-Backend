@@ -282,8 +282,7 @@ public class DayOffReservations {
                         .findFirst().orElse(null);
                 if (colleague != null) {
                     throw new BusinessRuleException(colleague.getFullName() + " already has " + dayName + "s off at "
-                            + e.getHomeStore().getName() + ". Only one person per store can be off on the same day, "
-                            + "so pick another day for " + e.getFirstName() + ".");
+                            + e.getHomeStore().getName() + ". Pick another day.");
                 }
             }
             java.util.Set<Long> off = new java.util.HashSet<>();
@@ -295,8 +294,7 @@ public class DayOffReservations {
                 String others = sameDay.isEmpty() ? ""
                         : " (" + String.join(", ", sameDay.stream().map(Employee::getFirstName).limit(6).toList())
                                 + (sameDay.size() == 1 ? " is" : " are") + " already off every " + dayName + ")";
-                throw new BusinessRuleException("With " + e.getFirstName() + " off every " + dayName + " too, the "
-                        + "stores would be " + shortBy + (shortBy == 1 ? " person" : " people") + " short" + others
+                throw new BusinessRuleException(dayName + "s would be " + shortBy + (shortBy == 1 ? " person" : " people") + " short" + others
                         + ". Pick another day.");
             }
         }

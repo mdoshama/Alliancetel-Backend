@@ -153,7 +153,7 @@ class WhatsAppIntegrationTest {
         notifications.deleteAll();
         // As if published by the previous version: no record of what was sent.
         scheduleRepository.findById(s.id()).orElseThrow().getEntries().forEach(e -> e.setPublishedLabel(null));
-        Long request = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday.plusDays(3)), null, true))
+        Long request = dayOffService.create(new CreateDayOffRequest(ana, List.of(monday.plusDays(3)), "Urgent", true))
                 .getFirst().id();
         dayOffService.approve(request, null);
         assertTrue(notifications.findAll().stream().noneMatch(n -> n.getKind() == NotificationKind.WEEK_CHANGED),

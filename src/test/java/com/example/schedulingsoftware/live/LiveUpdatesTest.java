@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -88,7 +89,7 @@ class LiveUpdatesTest {
                 .header(LiveChangeInterceptor.CLIENT_HEADER, "tab-abcdef12")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Pushed Area\",\"active\":true}"))
                 .andExpect(status().is2xxSuccessful());
-        verify(liveUpdates).publish(eq("people"), any(CurrentUser.class), eq("tab-abcdef12"));
+        verify(liveUpdates).publish(eq("people"), any(CurrentUser.class), isNull(), eq("tab-abcdef12"));
     }
 
     @Test
@@ -97,7 +98,7 @@ class LiveUpdatesTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Nope\",\"active\":true}"))
                 .andExpect(status().isForbidden());
         mvc.perform(get("/api/areas").header("Authorization", "Bearer " + manager)).andExpect(status().isOk());
-        verify(liveUpdates, never()).publish(anyString(), any(), any());
+        verify(liveUpdates, never()).publish(anyString(), any(), any(), any());
     }
 
     @Test

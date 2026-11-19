@@ -72,6 +72,13 @@ public class WeeklySchedule {
     @org.hibernate.annotations.ColumnDefault("'MAIN'")
     private ScheduleKind kind = ScheduleKind.MAIN;
 
+    /**
+     * "Schedule by System": a fingerprint of what the week was built from (days off, staff, stores). While nobody has
+     * edited it, the system builds it again when this changes, so it stays current.
+     */
+    @jakarta.persistence.Column(length = 64)
+    private String sourceHash;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 

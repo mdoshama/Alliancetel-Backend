@@ -10,5 +10,10 @@ public enum ScheduleKind {
     /** Starts blank: a manager places everyone by hand. Approved days off are shown, locked. */
     EMPTY,
     /** Starts with only the days off filled in (approved requests and regular days); the rest by hand or by the system. */
-    DAYS_OFF
+    DAYS_OFF,
+    /**
+     * "Schedule by System": the system builds the week by itself and keeps it current while nobody has edited it. Once a
+     * manager or admin changes a day it stays as they left it. Publishing it copies it into {@link #MAIN}.
+     */
+    SYSTEM
 }

@@ -89,6 +89,12 @@ public class Store {
             uniqueConstraints = @UniqueConstraint(name = "uk_store_hours_day", columnNames = {"store_id", "day_of_week"}))
     private List<StoreDayHours> hours = new ArrayList<>();
 
+    /** Dates the store is closed (holidays), whatever its weekly hours say. */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "store_closures", joinColumns = @JoinColumn(name = "store_id"),
+            uniqueConstraints = @UniqueConstraint(name = "uk_store_closure_day", columnNames = {"store_id", "closed_on"}))
+    private List<StoreClosure> closures = new ArrayList<>();
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -123,8 +129,18 @@ public class Store {
                 .orElseGet(() -> StoreDayHours.open(day, DEFAULT_OPENS_AT, DEFAULT_CLOSES_AT));
     }
 
+    /** Hours on that date: closed on a holiday closure, otherwise the weekday's hours. */
+    public StoreDayHours hoursOn(java.time.LocalDate date) {
+        return closureOn(date).isPresent() ? StoreDayHours.closedOn(date.getDayOfWeek()) : hoursOn(date.getDayOfWeek());
+    }
+
+    /** The holiday closure on that date, if any. */
+    public java.util.Optional<StoreClosure> closureOn(java.time.LocalDate date) {
+        return closures.stream().filter(c -> c.getDate().equals(date)).findFirst();
+    }
+
     public boolean isOpenOn(java.time.LocalDate date) {
-        return !hoursOn(date.getDayOfWeek()).isClosed();
+        return !hoursOn(date).isClosed();
     }
 
     /**
@@ -132,7 +148,7 @@ public class Store {
      * store's usual minimum. 0 when the store is closed.
      */
     public int minStaffOn(java.time.LocalDate date) {
-        StoreDayHours h = hoursOn(date.getDayOfWeek());
+        StoreDayHours h = hoursOn(date);
         if (h.isClosed()) {
             return 0;
         }

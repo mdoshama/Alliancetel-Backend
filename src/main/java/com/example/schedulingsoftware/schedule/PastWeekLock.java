@@ -54,8 +54,7 @@ public class PastWeekLock {
         }
         LocalDate monday = DayOffService.weekStart(anyDayInWeek);
         if (openAccess(areaId, monday) == null) {
-            throw new BusinessRuleException("The week of " + shortDate(monday) + " has passed, so it's locked. "
-                    + "Ask an admin for access to make changes.");
+            throw new BusinessRuleException("Past week, locked. Ask an admin for access.");
         }
     }
 

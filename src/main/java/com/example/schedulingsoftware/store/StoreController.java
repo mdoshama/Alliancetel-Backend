@@ -26,6 +26,29 @@ import lombok.RequiredArgsConstructor;
 public class StoreController {
 
     private final StoreService storeService;
+    private final com.example.schedulingsoftware.schedule.ScheduleService scheduleService;
+
+    /** Holiday closures in an area, from today on. */
+    @GetMapping("/closures")
+    public List<StoreDtos.ClosureResponse> closures(@RequestParam(required = false) Long areaId) {
+        return storeService.closures(areaId);
+    }
+
+    /** Close stores on a date; schedules not yet published move people off those stores that day. */
+    @PostMapping("/closures")
+    public List<StoreDtos.ClosureResponse> close(@jakarta.validation.Valid @RequestBody StoreDtos.ClosureRequest request) {
+        storeService.close(request);
+        scheduleService.storesClosed(request.areaId(), request.date());
+        return storeService.closures(request.areaId());
+    }
+
+    /** Open again on a date: one store, or the whole area when no store is given. */
+    @DeleteMapping("/closures")
+    public List<StoreDtos.ClosureResponse> reopen(@RequestParam Long areaId, @RequestParam java.time.LocalDate date,
+            @RequestParam(required = false) Long storeId) {
+        storeService.reopen(areaId, date, storeId);
+        return storeService.closures(areaId);
+    }
 
     @GetMapping
     public List<StoreResponse> list(@RequestParam(required = false) Long areaId) {

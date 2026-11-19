@@ -117,6 +117,71 @@ public class StoreService {
         storeRepository.delete(store);
     }
 
+    // ---------- Holiday closures ----------
+
+    /** The area's closed dates from today on (or all, with past=true), soonest first. */
+    @Transactional(readOnly = true)
+    public List<StoreDtos.ClosureResponse> closures(Long requestedAreaId) {
+        Long areaId = accessPolicy.restrictToArea(requestedAreaId);
+        if (areaId == null) {
+            throw new BusinessRuleException("Pick an area.");
+        }
+        java.time.LocalDate today = java.time.LocalDate.now();
+        List<Store> stores = storeRepository.findByAreaIdOrderByNameAsc(areaId);
+        long open = stores.stream().filter(Store::isActive).count();
+        java.util.TreeMap<java.time.LocalDate, List<Store>> byDate = new java.util.TreeMap<>();
+        java.util.Map<java.time.LocalDate, String> labels = new java.util.HashMap<>();
+        for (Store s : stores) {
+            for (StoreClosure c : s.getClosures()) {
+                if (!c.getDate().isBefore(today)) {
+                    byDate.computeIfAbsent(c.getDate(), d -> new ArrayList<>()).add(s);
+                    if (c.getLabel() != null) {
+                        labels.putIfAbsent(c.getDate(), c.getLabel());
+                    }
+                }
+            }
+        }
+        return byDate.entrySet().stream().map(e -> new StoreDtos.ClosureResponse(e.getKey(), labels.get(e.getKey()),
+                e.getValue().stream().filter(Store::isActive).count() >= open && open > 0,
+                e.getValue().stream().map(s -> new StoreDtos.ClosedStore(s.getId(), s.getName(), s.getDisplayColor()))
+                        .toList())).toList();
+    }
+
+    /** Closes stores on a date: the ones picked, or every active store in the area. Returns the stores closed. */
+    @Transactional
+    public List<Store> close(StoreDtos.ClosureRequest request) {
+        accessPolicy.requireManagerOf(request.areaId());
+        java.time.LocalDate today = java.time.LocalDate.now();
+        if (request.date().isBefore(today)) {
+            throw new BusinessRuleException("Pick today or a later date.");
+        }
+        List<Store> stores = request.storeIds() == null || request.storeIds().isEmpty()
+                ? storeRepository.findByAreaIdOrderByNameAsc(request.areaId()).stream().filter(Store::isActive).toList()
+                : request.storeIds().stream().map(id -> requireAssignable(id, request.areaId())).toList();
+        if (stores.isEmpty()) {
+            throw new BusinessRuleException("No stores to close.");
+        }
+        String label = blankToNull(request.label());
+        for (Store s : stores) {
+            s.closureOn(request.date()).ifPresentOrElse(c -> c.setLabel(label),
+                    () -> s.getClosures().add(new StoreClosure(request.date(), label)));
+        }
+        storeRepository.flush();
+        return stores;
+    }
+
+    /** Opens stores again on a date: one store, or every store in the area. */
+    @Transactional
+    public void reopen(Long areaId, java.time.LocalDate date, Long storeId) {
+        accessPolicy.requireManagerOf(areaId);
+        for (Store s : storeRepository.findByAreaIdOrderByNameAsc(areaId)) {
+            if (storeId == null || s.getId().equals(storeId)) {
+                s.getClosures().removeIf(c -> c.getDate().equals(date));
+            }
+        }
+        storeRepository.flush();
+    }
+
     public Store getStore(Long id) {
         return storeRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Store", id));
     }

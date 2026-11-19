@@ -54,6 +54,8 @@ class DayOffApprovalIntegrationTest {
     ScheduleService scheduleService;
     @Autowired
     DayOffRequestRepository dayOffRequestRepository;
+    @Autowired
+    com.example.schedulingsoftware.notify.NotificationRepository notifications;
 
     Long area;
     Long store;
@@ -103,7 +105,65 @@ class DayOffApprovalIntegrationTest {
         Long entry = day(filled, anna, workDay.date()).entryId();
         assertEquals(DayType.WORK, day(scheduleService.updateEntry(after.id(), entry, DayType.WORK, store), anna,
                 workDay.date()).type());
-        assertTrue(dayOffRequestRepository.findById(approved.id()).isEmpty(), "she works it: the day off is deleted");
+        DayOffRequest takenBack = dayOffRequestRepository.findById(approved.id()).orElseThrow();
+        assertEquals(DayOffStatus.REJECTED, takenBack.getStatus(), "she works it: the day off is taken back");
+        assertEquals(DayOffStatus.APPROVED, takenBack.getPreviousStatus());
+        assertTrue(ScheduleService.wasTakenBack(takenBack), takenBack.getDecisionChangeReason());
+        assertTrue(notifications.findAll().stream().anyMatch(n -> n.getEmployee().getId().equals(anna)
+                && n.getPreview() != null && n.getPreview().contains("was changed")), "she's told");
+
+        // The manager changes their mind: Off again gives her the day back.
+        assertEquals(DayType.REQUESTED_OFF, day(scheduleService.updateEntry(after.id(), entry, DayType.OFF, null), anna,
+                workDay.date()).type());
+        assertEquals(DayOffStatus.APPROVED, dayOffRequestRepository.findById(approved.id()).orElseThrow().getStatus());
+    }
+
+    @Test
+    void aDayOffTakenBackOnTheScheduleCanBeAskedForAgainAsAnEmergency() {
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        DayCell workDay = workDayWithFullStaff(s, anna);
+        DayOffResponse given = dayOffService.create(new CreateDayOffRequest(anna, List.of(workDay.date()), null, null)).getFirst();
+        ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
+        scheduleService.updateEntry(after.id(), day(after, anna, workDay.date()).entryId(), DayType.WORK, store);
+
+        TestUsers.signInAs(anna, Role.EMPLOYEE, area);
+        // A normal request isn't possible (the week is made), and an emergency needs a reason.
+        assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(workDay.date()), null, false)));
+        BusinessRuleException noReason = assertThrows(BusinessRuleException.class, () -> dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(workDay.date()), "  ", true)));
+        assertTrue(noReason.getMessage().contains("reason"), noReason.getMessage());
+
+        DayOffResponse again = dayOffService.create(
+                new CreateDayOffRequest(anna, List.of(workDay.date()), "Doctor", true)).getFirst();
+        assertEquals(DayOffStatus.PENDING, again.status());
+        assertTrue(again.emergency());
+        assertTrue(dayOffRequestRepository.findById(given.id()).isEmpty(), "the taken-back day is replaced");
+        // Asking for a taken-back day doesn't use up the month's emergency request.
+        assertTrue(dayOffRequestRepository.findById(again.id()).orElseThrow().isAfterTakenBack());
+        assertTrue(!dayOffService.window().emergencyUsedThisMonth()
+                || !monday.getMonth().equals(LocalDate.now().getMonth()), "still one emergency left this month");
+    }
+
+    @Test
+    void movingADayOffOnTheScheduleTellsThemTheNewDay() {
+        ScheduleResponse s = scheduleService.generate(area, monday);
+        DayCell workDay = workDayWithFullStaff(s, anna);
+        DayOffResponse given = dayOffService.create(new CreateDayOffRequest(anna, List.of(workDay.date()), null, null)).getFirst();
+        ScheduleResponse after = scheduleService.find(area, monday).orElseThrow();
+        // The manager gives her another day off instead: the old one goes back to work.
+        DayCell other = after.rows().stream().filter(r -> r.employeeId().equals(anna)).findFirst().orElseThrow()
+                .days().stream().filter(d -> d.type() == DayType.WORK && !d.date().equals(workDay.date())).findFirst()
+                .orElseThrow();
+        ScheduleResponse moved = scheduleService.updateEntry(after.id(), other.entryId(), DayType.OFF, null);
+        assertEquals(DayType.WORK, day(moved, anna, workDay.date()).type());
+        DayOffRequest old = dayOffRequestRepository.findById(given.id()).orElseThrow();
+        assertEquals(DayOffStatus.REJECTED, old.getStatus());
+        assertTrue(old.getDecisionChangeReason().contains("instead"), old.getDecisionChangeReason());
+        // The new day is hers on her side too, not only on the schedule.
+        DayOffRequest now = dayOffRequestRepository.findByEmployeeIdAndOffDate(anna, other.date()).orElseThrow();
+        assertEquals(DayOffStatus.APPROVED, now.getStatus());
+        assertEquals(DayType.OFF, day(moved, anna, other.date()).type());
     }
 
     @Test
@@ -188,7 +248,8 @@ class DayOffApprovalIntegrationTest {
         storeService.update(store, new StoreRequest(area, "Main", "MAIN", null, 4, true, null, null));
         ScheduleResponse s = dayOff(scheduleService.generate(area, monday), anna, 0);
         LocalDate offDay = row(s, anna).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow().date();
-        Long request = dayOffService.create(new CreateDayOffRequest(anna, List.of(offDay), null, null)).getFirst().id();
+        // The day off the manager gave on the schedule is already on record as hers.
+        Long request = dayOffRequestRepository.findByEmployeeIdAndOffDate(anna, offDay).orElseThrow().getId();
         DayOffImpact impact = scheduleService.dayOffImpact(request);
         // It is already her day off, so approving changes nothing, but the day is still short.
         assertTrue(impact.newShortages().isEmpty());
@@ -196,7 +257,7 @@ class DayOffApprovalIntegrationTest {
 
         LocalDate workDay = workDayWithFullStaff(s, anna).date();
         // An emergency one still goes to the manager.
-        Long second = dayOffService.create(new CreateDayOffRequest(anna, List.of(workDay), null, true)).getFirst().id();
+        Long second = dayOffService.create(new CreateDayOffRequest(anna, List.of(workDay), "Urgent", true)).getFirst().id();
         DayOffImpact worse = scheduleService.dayOffImpact(second);
         assertEquals(ImpactLevel.SHORT, worse.level(), "3 of 4 becoming 2 of 4 is worse, even though it was short already");
     }
@@ -257,7 +318,7 @@ class DayOffApprovalIntegrationTest {
         BusinessRuleException again = assertThrows(BusinessRuleException.class,
                 () -> dayOffService.create(new CreateDayOffRequest(ben, List.of(wed), null, null)));
         assertTrue(again.getMessage().contains("is full"), again.getMessage());
-        assertEquals(1, dayOffService.create(new CreateDayOffRequest(ben, List.of(wed), null, true)).size());
+        assertEquals(1, dayOffService.create(new CreateDayOffRequest(ben, List.of(wed), "Urgent", true)).size());
     }
 
     @Test
@@ -278,7 +339,8 @@ class DayOffApprovalIntegrationTest {
         TestUsers.signInAsAdmin();
         LocalDate caraOff = row(s, cara).days().stream().filter(c -> c.type() == DayType.OFF).findFirst().orElseThrow().date();
         assertEquals(DayOffStatus.APPROVED,
-                dayOffService.create(new CreateDayOffRequest(cara, List.of(caraOff), null, null)).getFirst().status());
+                dayOffRequestRepository.findByEmployeeIdAndOffDate(cara, caraOff).orElseThrow().getStatus(),
+                "the day off the manager gave on the schedule is hers on her side too");
     }
 
     @Test
@@ -290,7 +352,7 @@ class DayOffApprovalIntegrationTest {
         assertTrue(urgent.emergency());
         assertEquals(DayOffStatus.PENDING, urgent.status(), "still needs a manager");
         // Doesn't use up the limit either: Ben's emergency on Anna's day is allowed too.
-        assertTrue(dayOffService.create(new CreateDayOffRequest(ben, List.of(tue), null, true)).getFirst().emergency());
+        assertTrue(dayOffService.create(new CreateDayOffRequest(ben, List.of(tue), "Urgent", true)).getFirst().emergency());
         // A normal one for Anna that week is still over the limit.
         assertThrows(BusinessRuleException.class,
                 () -> dayOffService.create(new CreateDayOffRequest(anna, List.of(tue.plusDays(4)), null, null)));
@@ -320,14 +382,14 @@ class DayOffApprovalIntegrationTest {
         LocalDate tue = monday.plusDays(1);
         LocalDate wed = monday.plusDays(2);
         // Only emergencies wait for a decision now.
-        Long annaTue = dayOffService.create(new CreateDayOffRequest(anna, List.of(tue), null, true)).getFirst().id();
-        Long caraTue = dayOffService.create(new CreateDayOffRequest(cara, List.of(tue), null, true)).getFirst().id();
+        Long annaTue = dayOffService.create(new CreateDayOffRequest(anna, List.of(tue), "Urgent", true)).getFirst().id();
+        Long caraTue = dayOffService.create(new CreateDayOffRequest(cara, List.of(tue), "Urgent", true)).getFirst().id();
         // Ben and Extra4 both ask for Wednesday (emergency, past the one-per-store rule): only one of them fits.
-        Long benWed = dayOffService.create(new CreateDayOffRequest(ben, List.of(wed), null, true)).getFirst().id();
+        Long benWed = dayOffService.create(new CreateDayOffRequest(ben, List.of(wed), "Urgent", true)).getFirst().id();
         Long ex = employeeIdByName(s, "Extra4");
-        Long exWed = dayOffService.create(new CreateDayOffRequest(ex, List.of(wed), null, true)).getFirst().id();
+        Long exWed = dayOffService.create(new CreateDayOffRequest(ex, List.of(wed), "Urgent", true)).getFirst().id();
         Long extra5 = employeeIdByName(s, "Extra5");
-        Long ex5Wed = dayOffService.create(new CreateDayOffRequest(extra5, List.of(wed), null, true)).getFirst().id();
+        Long ex5Wed = dayOffService.create(new CreateDayOffRequest(extra5, List.of(wed), "Urgent", true)).getFirst().id();
 
         ScheduleResponse withRequests = scheduleService.find(area, monday).orElseThrow();
         assertEquals(5, withRequests.requests().size());

@@ -73,6 +73,10 @@ public class ScheduleEntry {
     @Column(length = 120)
     private String publishedLabel;
 
+    /** "Schedule by System": what the system had for this day when it built the week (e.g. "Oceanside 10am–8pm", "Off"). */
+    @Column(length = 120)
+    private String systemLabel;
+
     public ScheduleEntry(WeeklySchedule schedule, Employee employee, LocalDate workDate, DayType type, Store store) {
         this.schedule = schedule;
         this.employee = employee;

@@ -112,6 +112,26 @@ public class ScheduleController {
     }
 
     /** The system decides every blank day of a draft built by hand (same rules as Generate). */
+    /** Tab "Schedule by System": built and kept current by the system until someone edits it. 204 = nothing to show. */
+    @GetMapping("/system")
+    public ResponseEntity<ScheduleResponse> system(@RequestParam Long areaId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+        return scheduleService.systemSchedule(areaId, weekStart).map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /** Builds "Schedule by System" again from scratch (changes made there are lost). */
+    @PostMapping("/system/rebuild")
+    public ScheduleResponse rebuildSystem(@Valid @RequestBody ScheduleDtos.SystemRequest request) {
+        return scheduleService.rebuildSystem(request.areaId(), request.weekStart());
+    }
+
+    /** Day-off draft: place every primary (or secondary) at their home store on their blank days. */
+    @PostMapping("/{scheduleId}/fill-role")
+    public ScheduleResponse fillRole(@PathVariable Long scheduleId, @Valid @RequestBody ScheduleDtos.FillRoleRequest request) {
+        return scheduleService.fillRole(scheduleId, request.role());
+    }
+
     @PostMapping("/{scheduleId}/fill-blanks")
     public ScheduleResponse fillBlanks(@PathVariable Long scheduleId) {
         return scheduleService.fillBlanks(scheduleId);
@@ -164,6 +184,8 @@ public class ScheduleController {
         // Nobody is left without a day off: waiting requests are settled, regular days come first, then requests,
         // and the system reserves the rest. A published week keeps the days it was published with.
         if (!reservations.published(request.areaId(), DayOffService.weekStart(request.weekStart()))) {
+            // Reset: days off given or taken back by hand go first, so the system builds the week as its own.
+            scheduleService.clearManualDaysOff(request.areaId(), request.weekStart());
             dayOffService.settleWaitingRequests(request.areaId(), request.weekStart());
             reservations.fillBeforeGenerating(request.areaId(), request.weekStart());
         }

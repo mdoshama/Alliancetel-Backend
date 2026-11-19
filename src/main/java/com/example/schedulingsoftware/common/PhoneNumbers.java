@@ -30,8 +30,7 @@ public final class PhoneNumbers {
             if (digits.length() == 10) {
                 digits = "1" + digits;
             } else if (!(digits.length() == 11 && digits.startsWith("1"))) {
-                throw new BusinessRuleException("Phone needs 10 digits for a US number, or a country code starting "
-                        + "with + (e.g. +977 981 234 5678).");
+                throw new BusinessRuleException("Phone needs 10 digits, or + and a country code.");
             }
         }
         if (digits.length() < 8 || digits.length() > 15 || digits.startsWith("0")) {

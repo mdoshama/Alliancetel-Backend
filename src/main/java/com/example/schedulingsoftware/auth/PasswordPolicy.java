@@ -50,8 +50,7 @@ public final class PasswordPolicy {
 
     /** One sentence for the sign-in pages. */
     public static String summary() {
-        return "Use at least " + MIN_LENGTH + " characters with a letter and a number. Avoid common words, "
-                + "the company name and your own name or email.";
+        return "At least " + MIN_LENGTH + " characters, with a letter and a number.";
     }
 
     /**
@@ -77,8 +76,7 @@ public final class PasswordPolicy {
         }
         String lettersOnly = lower.replaceAll("[^\\p{L}]", "");
         if (COMMON_WORDS.contains(lettersOnly) || COMMON_WORDS.contains(unLeet(lower)) || isSequence(lower.replaceAll("[^\\p{L}\\p{N}]", ""))) {
-            throw new BusinessRuleException("That password is too easy to guess. Avoid common words and patterns "
-                    + "like \"Welcome123\" or \"abcd1234\".");
+            throw new BusinessRuleException("Too easy to guess. Try something less common.");
         }
         for (String part : personalParts(personal)) {
             if (lower.contains(part)) {
