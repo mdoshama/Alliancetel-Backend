@@ -164,18 +164,20 @@ public final class DayOffDtos {
             /** Who decided: a manager's or admin's name, "System" when it was automatic, null while waiting. */
             String reviewedBy,
             /** A day the system would give, waiting with their emergency for a manager to decide. */
-            boolean heldForEmergency) {
+            boolean heldForEmergency,
+            /** The person's phone (+1…), so a manager can call to confirm; null if none. */
+            String employeePhone) {
 
         public DayOffResponse withScheduleUpdate(String update) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, update, reserved, regular, weekDaysOff, reviewedBy, heldForEmergency);
+                    decisionChangeReason, decisionChangedAt, update, reserved, regular, weekDaysOff, reviewedBy, heldForEmergency, employeePhone);
         }
 
         public DayOffResponse withWeekDaysOff(List<WeekDayOff> days) {
             return new DayOffResponse(id, employeeId, employeeCode, employeeName, areaId, areaName, date, dayOfWeek,
                     reason, emergency, status, reviewNote, reviewedAt, createdAt, previousStatus, decisionChangedBy,
-                    decisionChangeReason, decisionChangedAt, scheduleUpdate, reserved, regular, days, reviewedBy, heldForEmergency);
+                    decisionChangeReason, decisionChangedAt, scheduleUpdate, reserved, regular, days, reviewedBy, heldForEmergency, employeePhone);
         }
 
         /**
@@ -226,7 +228,8 @@ public final class DayOffDtos {
                     r.isRegular(),
                     null,
                     reviewerOf(r),
-                    r.isHeldForEmergency());
+                    r.isHeldForEmergency(),
+                    e.getPhone());
         }
     }
 
